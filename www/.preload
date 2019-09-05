@@ -18,7 +18,7 @@ end
 assert(type(conf.log.smtp.to=="string", "mako.conf missing log.smpt.to"))
 local email=conf.log.smtp.to
 
-settingsT.ipns1,settingsT.ipns1=ba.socket.toip(settingsT.ns1),ba.socket.toip(settingsT.ns2)
+settingsT.ipns1,settingsT.ipns2=ba.socket.toip(settingsT.ns1),ba.socket.toip(settingsT.ns2)
 
 
 local hostname
