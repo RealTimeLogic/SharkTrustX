@@ -1,0 +1,522 @@
+
+local hio=ba.openio"home"
+local rw=require"rwfile"
+local fmt=string.format
+local sbyte=string.byte
+
+local conf=require"loadconf"
+local settingsT=conf.settings
+local ok,err=pcall(function()
+  assert(type(settingsT.ns1) == 'string' and
+         type(settingsT.ns2) == 'string' and
+         type(settingsT.dn) == 'string')
+end) 
+if not ok then
+   error"Invalid settings table in mako.conf"
+end
+
+assert(type(conf.log.smtp.to=="string", "mako.conf missing log.smpt.to"))
+local email=conf.log.smtp.to
+
+settingsT.ipns1,settingsT.ipns1=ba.socket.toip(settingsT.ns1),ba.socket.toip(settingsT.ns2)
+
+
+local hostname
+do
+   local ip
+   local s=ba.socket.connect("google.com",80)
+   if s then 
+      ip=s:sockname()
+      s:close()
+   end
+   hostname = ip == settingsT.ipns1 and settingsT.ns1 or settingsT.ns2
+end
+
+if not hio:stat"zones" and not hio:mkdir"zones" then
+   error("Cannot create "..hio:realpath"zones")
+end
+
+local function log(iserr,fmts,...)
+   local msg=fmt("ACME: "..fmts,...)
+   tracep(false,iserr and 0 or 2,msg)
+   if mako.daemon then
+      local op = iserr and {flush=true,subject="ACME ERROR"} or {ts=true}
+      mako.log(msg,op)
+   end
+   return nil, msg
+end
+
+do -- xssfilter
+   local escSyms= {
+      ['&']="&amp;",
+      ['<']="&lt;",
+      ['>']="&gt;",
+      ['"']="&quot;",
+      ["'"]="&#x27;"
+   }
+   local function escape(c) return escSyms[c] end
+   function app.xssfilter(x)
+      if type(x) == "string" then
+         return string.gsub(x,"[&<>\"'/]", escape)
+      end
+      local t={}
+      for k,v in pairs(x) do
+         t[k] = string.gsub(v,"[&<>\"'/]", escape)
+      end
+      return t
+   end
+end
+local function trimS(s) return s and s:gsub("^%s*(.-)%s*$", "%1") end
+function app.trim(x)
+   if x then
+      if type(x) == "string" then return trimS(x) end
+      local t={}
+      for k,v in pairs(x) do t[k]=trimS(v) end
+      return t
+   end
+end
+local xssfilter,trim=xssfilter,trim
+
+local realm="DNS Service" -- for HA1 and auth management
+
+-- https://realtimelogic.com/ba/doc/en/lua/auth.html
+local function ha1(username,password)
+   return ba.crypto.hash"md5"(username)":"(realm)":"(password)(true,"hex")
+end
+
+
+local function peername(cmd)
+   local ip,port,is6=cmd:peername()
+   if is6 and ip:find("::ffff:",1,true) == 1 then
+      ip=ip:sub(8,-1)
+   end
+   return ip
+end
+
+-- Execute command 'cmd' in /usr/sbin/ with 'args'
+local function execsbin(cmd,args)
+   cmd=fmt("/usr/sbin/%s %s",cmd,args)
+   local resp,ecode=ba.exec(cmd)
+   if ecode ~= 0 then
+      log(true,"exec err %d for %s",ecode,cmd)
+   end
+   return {cmd=cmd,resp=resp,ecode=ecode}
+end
+
+
+
+-- Read or write zone JSON DB file.
+local function zfile(name,tab)
+   return rw.json(hio,"zones/"..name,tab)
+end
+
+-- Function zonesDB: Read or write file containing all known zones.
+-- zonesDB() : read, zonesDB(zonesT): write table
+-- zonesT: table with zone names, where key is account key (40 bytes)
+-- and val is table with:
+--   zname: zone (domain) name
+--   uname: zone owner's (admin) email address
+--   ha1: zone owner's password stored as HA1 hash
+--   time: when zone was created (seconds)
+-- See function createzone for details.
+local zonesDB -- func
+do -- private scope
+   local cachedZT
+   local time=os.time()
+   zonesDB=function(zonesT)
+      if zonesT then
+         cachedZT=zonesT
+         time=os.time()
+         return zfile("zones.json",zonesT)
+      end
+      if cachedZT then return cachedZT,time end
+      cachedZT=zfile("zones.json")
+      return cachedZT,time
+   end
+end
+-- End zonesDB
+
+-- Read or write z.[zkey].dev.json
+local function zoneDevDB(zkey, zoneT)
+   return zfile(fmt("z.%s.dev.json",zkey),zoneT)
+end
+
+-- Returns list (or table if getTab) of all devices (sub domain names) in zone.
+local function getDevNames(zoneT, getTab)
+   local nT={}
+   if getTab then
+      for _, devT in pairs(zoneT) do
+         nT[devT.name]=true
+      end
+   else
+      for _, devT in pairs(zoneT) do
+         table.insert(nT, devT.name)
+      end
+   end
+   return nT
+end
+
+-- Read or write z.[zkey].wan.json
+local function zoneWanDB(zkey, zoneT)
+   return zfile(fmt("z.%s.wan.json",zkey),zoneT)
+end
+
+-- Returns /etc/bind/zones/[zname].db
+local function mkFullZname(zname)
+   return fmt("/etc/bind/zones/%s.db",zname)
+end
+
+
+-- /etc/bind/named.conf.local
+local namedConfFmt=[[
+zone "%s" {
+type master;
+allow-transfer {"none";};
+file "/etc/bind/zones/%s.db";
+};
+
+]]
+local function updateNamedConf(zonesT)
+   local fp=_G.io.open("/etc/bind/named.conf.local","w")
+   for _,zoneT in pairs(zonesT or zonesDB()) do
+      fp:write(fmt(namedConfFmt,zoneT.zname,zoneT.zname))
+   end
+   fp:close()
+end
+
+--  /etc/bind/zones/<name>.db
+local zonefmt=[[
+$TTL 900
+@ IN SOA ns1.%s. admin.%s. (
+%d ; Serial
+3h ; Refresh
+1h ; Retry
+1w ; Expire
+900 ) ; Negative TTL cache
+; name servers - NS records
+     IN      NS      ns1.%s.
+     IN      NS      ns2.%s.
+; name servers - A records
+ns1.%s.   86400 IN      A       %s
+ns2.%s.   86400 IN      A       %s
+; DNS root domain
+%s. 86400 IN A %s
+%s. 86400 IN A %s
+]]
+-- Creates/overwrites /etc/bind/zones/[zname].db
+-- and executes: rndc reload [zname].db
+local function bindzonedb(zkey, zname, acmeRecT)
+   local resp={}
+   local fp=_G.io.open(mkFullZname(zname),"w")
+   fp:write(fmt(zonefmt,
+                zname,zname, -- SOA
+                os.time(), -- Serial
+                zname, -- NS record 1
+                zname, -- NS record 2
+                zname, settingsT.ipns1, -- NS A record one
+                zname, settingsT.ipns2, -- NS A record two
+                zname, settingsT.ipns1,
+                zname, settingsT.ipns2))
+   local function emitRec(name,class,type,data)
+      fp:write(fmt("%s %s %s %s\n",name,class,type,data))
+   end
+   local function laddr(devT) emitRec(devT.name,"IN","A",devT.ip) end
+   local function waddr(devT) emitRec(devT.name,"IN","A",devT.wan) end
+   local actionT={
+      ["local"]=laddr,
+      wan=waddr,
+      both=function(devT) laddr(devT) waddr(devT) end
+   }
+   for _, devT in pairs(zoneDevDB(zkey)) do actionT[devT.dns](devT) end
+   if acmeRecT then emitRec(acmeRecT.name, "IN", "TXT", acmeRecT.data) end
+   fp:close()
+end
+
+
+-- creates/renews and loads all certs for the registered zones (domains)
+local function acmebotSet(delay)
+   local function action()
+      local zones={settingsT.dn,hostname}
+      for zkey,zoneT in pairs(zonesDB() or {}) do
+         table.insert(zones,zoneT.zname)
+      end
+      local a=settingsT.acme
+      local op={
+         cleanup=true,
+         production=a.production,
+         rsa=a.rsa,
+         acceptterms=true
+      }
+      local ab=require"acmebot"
+      ab.configure(email,zones,op)
+      ab.start()
+   end
+   if delay then
+      -- Give 'bind' time to settle after running 'rndc reconfig'.
+      ba.timer(action):set(30000,true)
+   else
+      action()
+   end
+end
+
+
+local function createzone(zname, uname, pwd)
+   local zonesT=zonesDB() or {}
+   local zkey
+   while true do
+      zkey=ba.rndbs(20):gsub(".",function(x) return fmt("%02X",sbyte(x)) end)
+      if not zonesT[zkey] then break end
+   end
+   zonesT[zkey]={
+      zname=zname,
+      uname=uname,
+      ha1=ha1(uname,pwd),
+      time=os.time()
+   }
+   zonesDB(zonesT)
+   zoneDevDB(zkey, {})
+   zoneWanDB(zkey, {})
+   bindzonedb(zkey,zname)
+   updateNamedConf(zones)
+   execsbin("rndc","reconfig")
+   acmebotSet(true)
+   log(false, "New zone %s : %s", zname, uname)
+   return zkey
+end
+
+
+function app.checkCredentials(zoneT, uname, pwd)
+   return zoneT and zoneT.ha1 == ha1(uname or "",pwd or "")
+end
+
+-- Search all zones in zonesT and find zone by zone-name.
+local function findZone(zname, zonesT)
+   for zkey,zoneT in pairs(zonesT) do
+      if zname == zoneT.zname then return zkey,zoneT end
+   end
+end
+
+-- Update the 'bind' database file containing all zones and tell
+-- 'bind' to reload DB.
+local function updateZone(zkey, zname, acmeRecT)
+   bindzonedb(zkey, zname, acmeRecT)
+   execsbin("rndc","reload "..zname)
+end
+
+-- Deletes all data related to zone
+local function deleteZone(zname)
+   local resp={}
+   local zonesT=zonesDB()
+   local zkey, zoneT = findZone(zname,zonesT)
+   if not zoneT then return log(true, "deleteZone: cannot find %s",zname) end
+   zonesT[zkey]=nil
+   zonesDB(zonesT)
+   updateNamedConf()
+   execsbin("rndc","reconfig")
+   acmebotSet() -- delay not needed
+   _G.os.remove(mkFullZname(zname))
+   hio:remove(fmt("zones/z.%s.dev.json",zkey))
+   hio:remove(fmt("zones/z.%s.wan.json",zkey))
+   log(false, "Terminating zone %s : %s", zname, zoneT.uname)
+end
+
+
+
+-----------------------------------------------------------------------
+------ Code for managing client commands sent to '/command.lsp' -------
+-----------------------------------------------------------------------
+
+-- Client OK response (201)
+local function response(cmd, hT)
+   trace("OK RESP:", hT and ba.json.encode(hT))
+   if hT then
+      for k,v in pairs(hT) do cmd:setheader(k,v) end
+   end
+   cmd:setstatus(201)
+   cmd:setcontentlength(0)
+end
+
+-- Client error response (status)
+local function errorRsp(cmd, status, emsg)
+   trace("ERROR RESP:", emsg)
+   cmd:setstatus(status)
+   cmd:setheader("X-Reason", emsg)
+   cmd:setcontentlength(0)
+end
+
+local function getDnsType(hT)
+   local dns=hT["X-Dns"]
+   if dns ~= "wan" and dns ~= "both" then dns="local" end
+   return dns
+end
+
+-- The WAN DB stores all devices (sub domains) that are from a
+-- particular WAN address. Wan DB name is z.[40b-account-key].wan.json
+-- Wan DB: table where key is WAN IP address and value is a table where
+-- key is the 20B-device-key and value is boolean true.
+local function updateWanDb(zkey, devkey, wan, oldwan)
+   local wT=zoneWanDB(zkey)
+   if oldwan then
+      local t = wT[oldwan]
+      t[devkey]=nil
+      if not next(t) then wT[oldwan]=nil end
+   end
+   local t = wT[wan] or {}
+   t[devkey]=true
+   wT[wan]=t
+   zoneWanDB(zkey, wT)
+end
+
+-- Client "Register" device command
+local function cmdRegister(cmd,hT,zkey,zoneT)
+   local ip=hT["X-IpAddress"]
+   local name=hT["X-Name"] or "device"
+   if not ip then return errorRsp(cmd,400,"Invalid command") end
+   local zname = zonesDB()[zkey].zname
+   local ix=name:find(".",1,true)
+   if ix then
+      if name:sub(ix+1) ~= zname then
+         return errorRsp(cmd,400,"zone name does not match zone key")
+      end
+      name = name:sub(1,ix-1)
+   end
+   local nameT = getDevNames(zoneT, true)
+   local ix,orgn=1,name
+   while nameT[name] do ix=ix+1 name=fmt("%s%d",orgn,ix) end
+   while true do
+      devkey=ba.rndbs(10):gsub(".",function(x) return fmt("%02X",sbyte(x)) end)
+      if not zoneT[devkey] then break end
+   end
+   local wan=peername(cmd)
+   updateWanDb(zkey, devkey, wan)
+   local info=hT["X-Info"]
+   if info and #info > 40 then info=info:sub(1,40) end
+   zoneT[devkey]={
+      ip=ip,
+      name=name,
+      info=info,
+      wan=wan,
+      dns=getDnsType(hT),
+      time=os.time(),
+   }
+   zoneDevDB(zkey,zoneT)
+   updateZone(zkey,zname)
+   response(cmd, {["X-Dev"]=devkey, ["X-Name"]=fmt("%s.%s",name,zname)})
+end
+
+local function lookupDevT(cmd,hT,zoneT)
+   local devkey=hT["X-Dev"]
+   if not devkey then return errorRsp(cmd,400,"Invalid command") end
+   local devT = zoneT[devkey]
+   if not devT then return errorRsp(cmd,404,"Unknown X-Dev") end
+   return devkey, devT
+end
+
+-- Client "IsRegistered" device command
+local function cmdIsRegistered(cmd,hT,zkey,zoneT)
+   if not lookupDevT(cmd,hT,zoneT) then return end -- validate
+   response(cmd)
+end
+
+
+-- Client "SetIpAddress" device command
+local function cmdSetIpAddress(cmd,hT,zkey,zoneT)
+   local devkey,devT = lookupDevT(cmd,hT,zoneT)
+   if not devkey then return end
+   local ip=hT["X-IpAddress"]
+   if not ip then return errorRsp(cmd,400,"Invalid command") end
+   local wan=peername(cmd)
+   updateWanDb(zkey, devkey, wan, devT.wan)
+   devT.ip=ip
+   devT.wan=wan
+   devT.time=os.time()
+   devT.dns=getDnsType(hT)
+   zoneDevDB(zkey,zoneT)
+   local zname = zonesDB()[zkey].zname
+   updateZone(zkey, zname)
+   response(cmd, {["X-Name"]=fmt("%s.%s",devT.name,zname)})
+end
+
+-- Client "SetAcmeRecord" device command
+local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
+   local devkey,devT = lookupDevT(cmd,hT,zoneT)
+   if not devkey then return end
+   local rname=hT['X-RecordName']
+   local rdata=hT['X-RecordData']
+   if not rname or not rdata then return errorRsp(cmd,400,"Invalid command") end
+   devT.time=os.time()
+   zoneDevDB(zkey,zoneT)
+   updateZone(zkey,zonesDB()[zkey].zname,{name=rname..".",data=rdata})
+   response(cmd)
+end
+
+
+-- Client "RemoveAcmeRecord" device command
+local function cmdRemoveAcmeRecord(cmd,hT,zkey,zoneT)
+   if not lookupDevT(cmd,hT,zoneT) then return end -- validate
+   updateZone(zkey,zonesDB()[zkey].zname)
+   response(cmd)
+end
+
+-- Client "GetWan" device command
+local function cmdGetWan(cmd,hT,zkey,zoneT)
+   hT={["X-IpAddress"]=peername(cmd)}
+   response(cmd,hT)
+end
+
+-- All commands (functions)
+local commandT={
+   Register=cmdRegister,
+   IsRegistered=cmdIsRegistered,
+   SetIpAddress=cmdSetIpAddress,
+   SetAcmeRecord=cmdSetAcmeRecord,
+   RemoveAcmeRecord=cmdRemoveAcmeRecord,
+   GetWan=cmdGetWan,
+}
+
+-- Find and execute client command
+local function command(cmd)
+   local hT=xssfilter(trim(cmd:header()))
+   local zkey = hT["X-Key"]
+   local zoneT = zkey and zoneDevDB(zkey)
+   if not zoneT then return errorRsp(cmd,404, "Invalid X-Key") end
+   local c=commandT[hT["X-Command"]]
+   if not c then return errorRsp(cmd,400, "Unknown command") end
+   c(cmd,hT,zkey,zoneT)
+end
+
+-- LSP page "/command.lsp" calls app.command
+local function msgh(emsg) log(true,"%s",debug.traceback(emsg)) return emsg end
+function app.command(cmd)
+   local ok, err = xpcall(command,msgh,cmd) -- trap any Lua error
+   if not ok then errorRsp(cmd,500,err) end -- Server error
+end
+
+-----------------------------------------------------------------------
+----- END: Code for managing client commands sent to /command.lsp -----
+-----------------------------------------------------------------------
+
+local function delayedLoad()
+   -- rebuild 'bind' settings
+   for zkey,zoneT in pairs(zonesDB() or {}) do
+      bindzonedb(zkey,zoneT.zname)
+      execsbin("rndc","reload "..zoneT.zname)
+   end
+   updateNamedConf()
+   execsbin("rndc","reconfig")
+end
+
+ba.timer(function() ba.thread.run(delayedLoad) end):set(10000,true)
+acmebotSet(true) -- Start
+
+-- Export:
+-- app.xssfilter
+-- app.trim
+-- app.command
+app.createzone = createzone
+app.deleteZone = deleteZone
+app.settingsT = settingsT
+app.zonesDB = zonesDB
+app.zoneDevDB = zoneDevDB
+app.zoneWanDB = zoneWanDB
+app.peername = peername
