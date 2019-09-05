@@ -82,5 +82,6 @@ The printout should be for your own service's domain name. The above printout si
 
 ```console
 /etc/init.d/mako.sh start
+```
 
 You may now use a browser and navigate to xx.company.com (e.g. acme.realtimelogic.com)
