@@ -37,8 +37,10 @@ echo "Copying $BACME/www to /home/mako/"
 cp -r $BACME/www /home/mako/
 
 echo "Replacing /etc/init.d/mako.sh"
-cp mako.sh /etc/init.d/mako.sh
+cp $BACME/mako.sh /etc/init.d/mako.sh
 chmod +x /etc/init.d/mako.sh
+
+/etc/init.d/bind9 start
 
 cd /home/mako
 read -p "Press any key to edit mako.conf using the nano editor."

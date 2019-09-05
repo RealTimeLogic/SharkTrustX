@@ -178,7 +178,7 @@ file "/etc/bind/zones/%s.db";
 ]]
 local function updateNamedConf(zonesT)
    local fp=_G.io.open("/etc/bind/named.conf.local","w")
-   for _,zoneT in pairs(zonesT or zonesDB()) do
+   for _,zoneT in pairs(zonesT or zonesDB() or {}) do
       fp:write(fmt(namedConfFmt,zoneT.zname,zoneT.zname))
    end
    fp:close()
