@@ -58,13 +58,13 @@ settings={
    }
 }
 
--- The following 'log' setting is not required, but recommended
--- See the documentation for the required smtp fields
+-- Required and used by /home/mako/www/.preload
 log={
    logerr = true, -- Send Lua LSP exceptions by email
    smtp={
       subject="ACME Log",
-      See documentation: https://realtimelogic.com/ba/doc/en/Mako.html#oplog
+      -- See the documentation for the required smtp fields
+      -- https://realtimelogic.com/ba/doc/en/Mako.html#oplog
    }
 }
 ```

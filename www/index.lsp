@@ -8,8 +8,6 @@ end
 
 local zonesT,time = app.zonesDB()
 
-trace(page.time,time,page.time==time)
-
 local dnT
 if not zonesT then -- If new installation
    dnT={}
@@ -371,7 +369,6 @@ end
        end 
        emitLoginForm(ispost)
     elseif data.a=="s" then
-       trace(ba.json.encode(data))
        if ispost and data.terminate == 'yes' then
           app.deleteZone(host)
           response:sendredirect("https://"..app.settingsT.dn)

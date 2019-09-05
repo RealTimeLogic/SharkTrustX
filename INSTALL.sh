@@ -12,7 +12,8 @@ export BACME=$PWD
 apt remove apache2.* postfix rpcbind
 
 echo "Installing required packages"
-apt-get -y install nano bind9 dnsutils bind9utils
+apt-get -y install nano bind9 dnsutils bind9utils whois
+mkdir -p /etc/bind/zones/
 
 #install Mako
 clear
