@@ -11,10 +11,6 @@ export BACME=$PWD
 #Remove unwanted packages
 apt remove apache2.* postfix rpcbind
 
-#Update
-apt-get update
-apt-get -y upgrade
-
 echo "Installing required packages"
 apt-get -y install nano bind9 dnsutils bind9utils
 
@@ -32,7 +28,7 @@ chmod +x install.sh;
 if ! [ -d "/home/mako/www" ]; then
     echo "Oops, something failed!!"
     exit 1
-end
+fi
 
 echo "Stopping mako server and removing SMQ broker's www directory"
 /etc/init.d/mako.sh stop
@@ -47,8 +43,3 @@ chmod +x /etc/init.d/mako.sh
 cd /home/mako
 read -p "Press any key to edit mako.conf using the nano editor."
 nano mako.conf
-
-
-
-
-
