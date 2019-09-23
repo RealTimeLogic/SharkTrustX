@@ -42,7 +42,7 @@ local data = app.xssfilter(app.trim(request:data()))
 local function emitValidateForm()
    response:write[[
 <h1>Register</h1>
-<p>Register for Real Time Logic's Let's encrypt DNS Service.</p>
+<p>Register for Real Time Logic's Let's Encrypt DNS Service.</p>
 <div class="well">
 <form id="valform" method="post">
 <div class="form-group">
@@ -120,7 +120,7 @@ end
 
 local function emailAddrOk(email)
    if io:dofile".lua/freeproviders.lua"[email:match"@(.+)"] then
-      response:write'<h1>E-Mail address not accepted</h1><p>Please use your company email address.</p><p><a href="/">Continue</a></p>'
+      response:write"<h1>E-Mail address not accepted</h1><p>Please use your company email address.</p><p><b>Alternatively:</b><br><a href='https://github.com/RealTimeLogic/BACME'>Copy this service's code source from Github</a> and set up your own service.</p><p><a href='/'>Continue</a></p>"
       return false
    end
    return true

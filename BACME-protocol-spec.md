@@ -12,7 +12,7 @@ The BACME protocol together with the ACME protocol enables web servers deployed 
 
 ## 3 Message Types
 
-The device to BACME service request is sent as an HTTPS GET and the service responds with a 201 response for successful requests, 204 if the X-Key and/or X-Dev was not found, and 401 if the request was denied. The server may return a 500 response if anything unexpected happens on the server side. HTTP responses do not include a body. All data is exchanged using HTTP headers.
+The device to BACME service request is sent as an HTTPS GET. The service responds with a 201 response for successful requests, 204 if the X-Key and/or X-Dev was not found, and 401 if the request was denied. The server may return a 500 response if anything unexpected happens on the server side. HTTP responses do not include a body. All data is exchanged using HTTP headers.
 
 A 204, 401, 500 response includes the following:
 
@@ -88,7 +88,7 @@ Send the device IP address to the BACME service and update the DNS. A recommenda
 
 **HTTP Response Headers**
 
-No response headers are returned for a successful (201) response
+No response headers are returned for a successful (201) response.
 
 ### RemoveAcmeRecord
 

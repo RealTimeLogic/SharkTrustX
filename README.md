@@ -3,13 +3,13 @@ Automated Certificate Management and DNS Server
 
 This repository contains the source code for [Real Time Logic's Let's encrypt DNS Service](https://acme.realtimelogic.com/) and a ready to use installation script, making it easy for anyone to set up their own online service replica. The service is designed to run on one online VPS and uses [bind](https://en.wikipedia.org/wiki/BIND) for the DNS management. The bind service is controlled by a Lua powered application running on a Mako Server instance.
 
-**NOTE:** The following domain names are used in the instructions below and these names must be replaced by your own names such as xx.company.com.
+**NOTE:** The following domain names are used in the instructions below. Replace these names with your own such as xx.company.com.
 
 * **Name server 1:** acme1.realtimelogic.com
 * **Name server 2:** acme2.realtimelogic.com
 * **Service's domain name:** acme.realtimelogic.com
 
-The software requires two name servers listed in the configuration file, however, the software is currently limited to running on one VPS and the DNS A record for the three fields above must all point to the same VPS.
+The software requires two name servers listed in the configuration file. However, the software is currently limited to running on one VPS and the DNS A record for the three fields above must all point to the same VPS.
 
 ## Installation Instructions
 
@@ -68,7 +68,7 @@ log={
    }
 }
 ```
-Save the changes and start the mako server as follows in /home/mako as user 'root'
+Save the changes and start the Mako Server as follows in /home/mako as user 'root'
 
 ```console
 mako
@@ -78,7 +78,7 @@ You should see the following being printed in the console two minutes after star
 ```console
 ACME: acme.realtimelogic.com renewed
 ```
-The printout should be for your own service's domain name. The above printout signals that the service is operational. You may now terminate the Mako Server process by using CTRL-C and then start the service as a background processes:
+The printout should be for your own service's domain name. The above printout signals that the service is operational. You may now terminate the Mako Server process by using CTRL-C and then start the service as a background process:
 
 ```console
 /etc/init.d/mako.sh start
