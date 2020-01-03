@@ -328,7 +328,6 @@ end
 
 -- Client OK response (201)
 local function response(cmd, hT)
-   trace("OK RESP:", hT and ba.json.encode(hT))
    if hT then
       for k,v in pairs(hT) do cmd:setheader(k,v) end
    end
@@ -338,7 +337,6 @@ end
 
 -- Client error response (status)
 local function errorRsp(cmd, status, emsg)
-   trace("ERROR RESP:", emsg)
    cmd:setstatus(status)
    cmd:setheader("X-Reason", emsg)
    cmd:setcontentlength(0)
