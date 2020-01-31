@@ -11,7 +11,6 @@ if zkey and dname then
       local dkey=zoneT.devices[dname]
       if dkey then
          local t=app.rwDeviceT(dkey)
-         t.exptime=app.convertUTCTime(zoneT.certs[dname])
          local s = request:session()
          local auth=s and s.authenticated
          t.canrem = auth

@@ -4,8 +4,9 @@
     local data=request:data()
     if app.checkAdminCredentials(data.ba_username, data.ba_password) then
        request:session(true).authenticated=true
-       response:sendredirect"manage"
+       response:sendredirect"/manage"
     end
+    ba.sleep(1000)
  end 
 ?>
 <h1>Admin Login</h1>

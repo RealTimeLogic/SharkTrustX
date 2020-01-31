@@ -19,6 +19,15 @@
         "settings" : {
             "path" : "settings.lsp",
             "title" : "Settings"
+        },
+        "cgen" : {
+            "path" : "cgen.lsp",
+            "title" : "Generate C Code"
+        },
+        "recover" : {
+            "path" : "recover.lsp",
+            "title" : "Recover Account",
+            "nologin" : true
         }
     },
 

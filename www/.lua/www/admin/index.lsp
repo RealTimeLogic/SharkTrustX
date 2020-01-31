@@ -12,7 +12,7 @@ local function emitEmailDispatched(email) ?>
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-primary">
-<p>We have dispatched an email with setup instructions to <?lsp=email?>.</p>
+<p>We have sent an email with setup instructions to <?lsp=email?>.</p>
 <p>Please check your spam box and/or spam filters if you do not receive this email soon.</p>
 </div>
 </div>
@@ -38,7 +38,8 @@ if request:method() == "POST" then
          emitEmailNotValid()
          return
       end
-      local valkey=app.aesencode(ba.json.encode{e=data.email,d=data.domain})
+      local domain=data.domain:lower()
+      local valkey=app.aesencode(ba.json.encode{e=data.email,d=domain})
       local send = require"log".sendmail
       send{
          subject="DNS Service E-Mail Validation",
@@ -53,7 +54,7 @@ end
 
 
 <h1>Register</h1>
-<p>Register for Real Time Logic's DNS Service Service.</p>
+<p>Register for Real Time Logic's DNS Service.</p>
 <div class="card card-body bg-light">
 <form id="valform" method="post">
 <div class="form-group">

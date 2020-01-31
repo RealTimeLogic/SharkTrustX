@@ -286,7 +286,7 @@ local function createZone(zname, uname, pwd)
    end
    -- Store new zone and save
    rwZoneT(zkey, {uname=uname,ha1=ha1,zname=zname,
-              rtime=os.time(),devices={},certs={}})
+              rtime=os.time(),devices={}})
    zonesT[zname]=zkey
    wZonesT(zonesT)
    bindzonedb(zkey,zname)
@@ -356,7 +356,6 @@ local function deleteDevice(zname, zkey, dname, dkey)
       if wanT then
          wanT[dname]=nil
          zoneT.devices[dname]=nil
-         zoneT.certs[dname]=nil
          rwZoneT(zkey,zoneT)
          rwWanT(zkey,wansT)
          rmDevice(dkey)
@@ -421,11 +420,9 @@ local function getAndCheckIp(cmd,hT)
    return ip
 end
 
--- Client "Register" device command
-local function cmdRegister(cmd,hT,zkey,zoneT)
-   local ip=getAndCheckIp(cmd,hT)
-   if not ip then return end
+local function getName(cmd,hT,zoneT)
    local name=hT["X-Name"] or "device"
+   name=name:lower()
    local ix=name:find(".",1,true)
    if ix then
       if name:sub(ix+1) ~= zoneT.zname then
@@ -433,6 +430,16 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
       end
       name = name:sub(1,ix-1)
    end
+   return name
+end
+
+
+-- Client "Register" device command
+local function cmdRegister(cmd,hT,zkey,zoneT)
+   local ip=getAndCheckIp(cmd,hT)
+   if not ip then return end
+   local name=getName(cmd,hT,zoneT)
+   if not name then return end
    -- Make sure sub-domain name is unique by checking name conflict in nameT
    local nameT,ix,orgn=zoneT.devices,0,name
    while nameT[name] do ix=ix+1 name=fmt("%s%d",orgn,ix) end
@@ -454,7 +461,6 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
       wan=wan,
    }
    zoneT.devices[name]=dkey -- Add new
-   zoneT.certs[name]=0 -- Set expired
    rwZoneT(zkey,zoneT) -- Insert new device in zone table
    updateWanT(zkey,name,ip,wan) -- Insert new device in zone wan table
    rwDeviceT(dkey, devT) -- Save new device
@@ -462,10 +468,20 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
 
+
 -- Client "IsRegistered" device command
-local function cmdIsRegistered(cmd,hT,zkey)
-   if not lookupDev(cmd,hT) then return end -- validate
-   rsp(cmd)
+local function cmdIsRegistered(cmd,hT,zkey,zoneT)
+   local dkey,devT = lookupDev(cmd,hT)
+   if not dkey then return end
+   rsp(cmd, {["X-Name"]=fmt("%s.%s",devT.name,zoneT.zname)})
+end
+
+
+-- Client "IsAvailable" device command
+local function cmdIsAvailable(cmd,hT,zkey,zoneT)
+   local name=getName(cmd,hT,zoneT)
+   if not name then return end
+   rsp(cmd, {["X-Available"] = zoneT.devices[name] and "No" or "Yes"})
 end
 
 -- Client "SetIpAddress" device command
@@ -521,6 +537,7 @@ end
 local commandT={
    Register=cmdRegister,
    IsRegistered=cmdIsRegistered,
+   IsAvailable=cmdIsAvailable,
    SetIpAddress=cmdSetIpAddress,
    SetAcmeRecord=cmdSetAcmeRecord,
    RemoveAcmeRecord=cmdRemoveAcmeRecord,
@@ -532,7 +549,7 @@ local function command(cmd)
    local hT=xssfilter(trim(cmd:header()))
    local zkey = hT["X-Key"]
    if not zkey then -- Not a BACME client
-      return response:senderror(404)
+      return cmd:senderror(404)
    end
    -- Client must use a secure connection
    if not cmd:issecure() then return errorRsp(cmd,400, "TLS required") end
@@ -577,6 +594,7 @@ end
 ba.thread.run(delayedLoad)
 
 -- Export:
+app.ha1=ha1
 app.createZone = createZone
 app.deleteDevice=deleteDevice
 app.deleteZone = deleteZone
@@ -600,11 +618,11 @@ end
 
 do
    local aeskey=ba.aeskey(32)
-   function app.aesencode(tab)
-      return ba.aesencode(aeskey,tab)
+   function app.aesencode(data)
+      return ba.aesencode(aeskey,data)
    end
    function app.aesdecode(data)
-      return ba.json.decode(ba.aesdecode(aeskey,data) or "")
+      return ba.aesdecode(aeskey,data)
    end
 end
 

@@ -55,7 +55,7 @@ local function emitCredentialsForm(vk,email) ?>
 </div>
 <div class="form-group">
 <label for="password">Admin Password:</label>
-<input class="form-control" placeholder="Enter a password" type="password" id="password" name="password" minlength="8" autofocus nowhitespace="true" tabindex="1"
+<input class="form-control" placeholder="Enter a password" type="password" id="password" name="password" minlength="8" autofocus nowhitespace="true" tabindex="1"/>
 </div>
 <div class="form-group">
 <label for="password2">Confirm Password:</label>
@@ -103,10 +103,12 @@ end
 local function sendRegCompletedEmail(email,zkey,domain)
    local send = require"log".sendmail
    send{
-      subject="DNS Service Account Information",
+      subject="DNS Service Account Information: "..domain,
       to=email,
-      body=string.format("Your zone key:\n%s\n\nYour zone URL:\nhttps://%s%s",
-                         zkey,domain,
+      body=string.format("Your zone key:\n%s%sYour zone URL:\nhttps://%s%s",
+                         zkey,
+                         "\n\nPlease store the secret zone key in a safe and secure location. The zone key must be kept a secret!\n\nYou will not be able to recover your account should you lose the zone key.\n\n",
+                         domain,
 "\n\nNote: it may take time for the DNS settings to replicate across the Internet and the above URL may not be immediately accessible.")
    }
 end
@@ -121,10 +123,17 @@ local function whois(domain)
    return rsp
 end
 
+local function digTrace(domain)
+   local rsp,n,e=ba.exec("dig @8.8.8.8 +trace NS "..domain)
+   if not rsp then rsp = e or "FAILED" end
+   return rsp
+end
+
+
 if request:method()=="POST" then
    local data=request:data()
    if data.v then
-      local t=app.aesdecode(data.v)
+      local t=ba.json.decode(app.aesdecode(data.v) or "")
       if t then
          local email,domain=t.e,t.d
          if app.rcZonesT()[domain] then return emitAlreadyReg() end
@@ -137,11 +146,16 @@ if request:method()=="POST" then
             emitRegComplete()
             return
          else
-            local rspl=whois(domain):lower()
+            local rspl=digTrace(domain):lower()
             if rspl:find(ns.ns1,1,true) and rspl:find(ns.ns2,1,true) then
                emitCredentialsForm(data.v,email)
             else
-               emitInvalidDNS(rspl)
+               rspl=whois(domain):lower()
+               if rspl:find(ns.ns1,1,true) and rspl:find(ns.ns2,1,true) then
+                  emitCredentialsForm(data.v,email)
+               else
+                  emitInvalidDNS(rspl)
+               end
             end
          end
          return

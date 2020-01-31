@@ -4,8 +4,9 @@
     local data=request:data()
     if app.checkCredentials(app.rwZoneT(page.zkey), data.ba_username, data.ba_password) then
        request:session(true).authenticated=true
-       response:sendredirect"/"
-    end 
+       response:sendredirect"/manage"
+    end
+    ba.sleep(1000)
  end
 ?>
 <h1>Zone Admin Login</h1>
@@ -22,4 +23,5 @@
     </div>
     <input type="submit" class="btn btn-primary btn-block" value="Enter" tabindex="3">
   </form>
+  <span><a style="float:right;color:gray" href="/recover">Forgot account?</a></span>
 </div>
