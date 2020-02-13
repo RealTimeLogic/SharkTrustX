@@ -413,7 +413,7 @@ local function getAndCheckIp(cmd,hT)
    for i=1,4 do a[i]=tonumber(a[i]) end
    for i=1,4 do
       local n=a[i]
-      if type(n) ~= "number" or n < 1 or n > 255 then
+      if type(n) ~= "number" or n < 0 or n > 255 then
          return errorRsp(cmd,400, "Invalid IP addr: "..ip)
       end
    end
