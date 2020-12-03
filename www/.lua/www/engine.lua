@@ -1,4 +1,5 @@
-local app=app -- Must be closure
+
+local log=_G.log
 
 local function parseLspPage(name)
    local func
@@ -14,7 +15,7 @@ local function parseLspPage(name)
          if func then return func end
       end
    end
-   app.log(true,"parsing %s failed: %s",name,err)
+   log(true,"parsing %s failed: %s",name,err)
    return function(_ENV) print(name,err) end
 end
 -- Cache the template page.

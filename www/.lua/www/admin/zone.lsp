@@ -21,10 +21,10 @@ for _ in pairs(zoneT.devices) do dCount = dCount + 1 end
   <div class="alert alert-success" role="alert">
    <table>
    <tr><td>Domain:</td><td><?lsp=string.format("<a href='https://%s'>https://%s</a>",zname,zname)?></td></tr>
-   <tr><td>Zone Key:</td><td><?lsp=zkey?></td></tr>
    <tr><td>Owner:</td><td><?lsp=zoneT.uname?></td></tr>
    <tr><td>Registered:</td><td><?lsp=os.date("%c",zoneT.rtime)?></td></tr>
    <tr><td>Devices:</td><td><?lsp=dCount?></td></tr>
+   <tr><td>Zone Key:</td><td><?lsp=zkey?></td></tr>
    </table>
    </div>
   <div class="form-group">&nbsp;</div>
@@ -39,7 +39,7 @@ for _ in pairs(zoneT.devices) do dCount = dCount + 1 end
 <script>
 $(function() {
     $("#termbut").click(function(){
-        var yes = prompt("Enter 'yes' to terminate your account","no");
+        var yes = prompt("Enter 'yes' to terminate account","no");
         $("#terminate").val(yes);
         return yes == "yes";
     });

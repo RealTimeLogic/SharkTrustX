@@ -95,7 +95,7 @@ local function manageSecurityCode()
             to=zT.uname,
             body=fmt("A password reset request has been initiated from %s. You may simply discard this email if you did not initiate this request.\n\nTo reset your password, copy the following Security Code and paste the code into the web form.\n\nSecurity Code: %s", peer, encodeSecCode(secCode))
          }
-         app.log(false,"Password reset request from %s, originating from %s",zname,peer) 
+         log(false,"Password reset request from %s, originating from %s",zname,peer) 
       end
       ba.thread.run(sendEmail)
    end

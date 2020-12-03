@@ -20,6 +20,10 @@
             "path" : "settings.lsp",
             "title" : "Settings"
         },
+        "verification" : {
+            "path" : "verification.lsp",
+            "title" : "Enter Verification Code"
+        },
         "cgen" : {
             "path" : "cgen.lsp",
             "title" : "Generate C Code"
