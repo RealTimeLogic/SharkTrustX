@@ -167,8 +167,9 @@ ns2.%s.   86400 IN      A       %s
 %s. 86400 IN A %s
 ]]
 -- Creates/overwrites /etc/bind/zones/[zname].db
-local function bindzonedb(zkey, zname, acmeRecT)
+local function bindzonedb(zoneT, acmeRecT)
    local resp={}
+   local zname=zoneT.zname
    local fp=_G.io.open(mkFullZname(zname),"w")
    fp:write(fmt(zonefmt,
                 zname,zname, -- SOA
@@ -190,7 +191,7 @@ local function bindzonedb(zkey, zname, acmeRecT)
       wan=waddr,
       both=function(devT) laddr(devT) waddr(devT) end
    }
-   for dname,dkey in pairs(db.rwZoneT(zkey).devices) do
+   for dname,dkey in pairs(zoneT.devices) do
       local devT,fn=db.rwDeviceT(dkey)
       if devT then
          actionT[devT.dns](devT)
@@ -198,7 +199,11 @@ local function bindzonedb(zkey, zname, acmeRecT)
          log(TRUE, "Corrupt DB, missing %s for %s", fn, dname)
       end
    end
-   if acmeRecT then emitRec(acmeRecT.name, "IN", "TXT", acmeRecT.data) end
+   if acmeRecT then
+      for k,v in pairs(acmeRecT) do
+         emitRec(k..".", "IN", "TXT", v) -- Should be absolute: Add a .
+      end
+   end
    fp:close()
 end
 
@@ -246,12 +251,13 @@ local function createZone(zname, uname, pwd)
       zkey=create64btHexKey()
       if not kZonesT[zkey] then break end
    end
+   local zoneT={uname=uname,ha1=ha1,zname=zname,
+      rtime=os.time(),devices={},secret=create64btHexKey()}
    -- Store new zone and save
-   db.rwZoneT(zkey, {uname=uname,ha1=ha1,zname=zname,
-              rtime=os.time(),devices={},secret=create64btHexKey()})
+   db.rwZoneT(zkey, zoneT)
    zonesT[zname]=zkey
    db.wZonesT(zonesT)
-   bindzonedb(zkey,zname)
+   bindzonedb(zoneT)
    updateNamedConf(zonesT)
    execsbin("rndc","reconfig")
    acmebotSet(true)
@@ -275,13 +281,35 @@ function app.checkCredentials(zoneT, uname, pwd)
 end
 
 
+-- Returns (and creates) the recsT, which may initially be nil.
+-- RecsT[zkey] is a table with record-name (key) and data (value)
+local function getRecsTfromZoneT(zoneT, dkey)
+   local recsT = zoneT.recsT
+   if not recsT then
+      recsT={}
+      zoneT.recsT=recsT
+   end
+   if dkey then
+      local t = recsT[dkey]
+      if not t then t={}  recsT[dkey]=t end
+      return recsT, t
+   end
+   return recsT
+end
 
 
 -- Update the 'bind' database file containing all zones and tell
 -- 'bind' to reload DB.
-local function updateZone(zkey, zname, acmeRecT)
-   bindzonedb(zkey, zname, acmeRecT)
-   execsbin("rndc","reload "..zname)
+local function updateZone(zoneT)
+   local recsT=getRecsTfromZoneT(zoneT)
+   local extraRecsT={}
+   for _,recT in pairs(recsT) do
+      for k, v in pairs(recT) do
+         extraRecsT[k]=v
+      end
+   end
+   bindzonedb(zoneT, extraRecsT)
+   execsbin("rndc","reload "..zoneT.zname)
 end
 
 -- Deletes all data related to zone
@@ -313,13 +341,12 @@ local function deleteDevice(zname, zkey, dname, dkey)
          db.rwZoneT(zkey,zoneT)
          db.rwWanT(zkey,wansT)
          db.rmDevice(dkey)
-         updateZone(zkey, zname)
+         updateZone(zoneT)
          return true
       end
    end
    error"deleteDevice: not found"
 end
-
 
 -----------------------------------------------------------------------
 ------ Code for managing client commands sent to '/command.lsp' -------
@@ -414,7 +441,7 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    db.rwZoneT(zkey,zoneT) -- Insert new device in zone table
    db.updateWanT(zkey,name,ip,wan) -- Insert new device in zone wan table
    db.rwDeviceT(dkey, devT) -- Save new device
-   updateZone(zkey,zoneT.zname) -- Update bind
+   updateZone(zoneT) -- Update bind
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
 
@@ -449,7 +476,7 @@ local function cmdSetIpAddress(cmd,hT,zkey,zoneT)
       devT.wan=wan
       devT.dns=dtype
       db.rwDeviceT(dkey,devT) -- Save devT changes
-      updateZone(zkey, zoneT.zname)  -- Update bind
+      updateZone(zoneT)  -- Update bind
    else
       db.rwDeviceT(dkey,devT) -- Save updated devT.atime
    end
@@ -465,7 +492,10 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
    if not rname or not rdata then return errorRsp(cmd,400,"Invalid command") end
    devT.atime=os.time()
    db.rwDeviceT(dkey,devT) -- Save devT changes
-   updateZone(zkey,zoneT.zname,{name=rname..".",data=rdata})
+   local recsT,recT = getRecsTfromZoneT(zoneT, dkey)
+   recT[rname]=rdata
+   db.rwZoneT(zkey, zoneT)
+   updateZone(zoneT)
    rsp(cmd)
 end
 
@@ -473,7 +503,10 @@ end
 local function cmdRemoveAcmeRecord(cmd,hT,zkey,zoneT)
    local dkey,devT = lookupDev(cmd,hT)
    if not dkey then return end
-   updateZone(zkey,zoneT.zname)
+   local recsT=getRecsTfromZoneT(zoneT)
+   recsT[dkey] = nil
+   db.rwZoneT(zkey, zoneT)
+   updateZone(zoneT)
    rsp(cmd)
 end
 
@@ -548,9 +581,14 @@ local function delayedLoad()
    ba.exec"/etc/init.d/bind9 stop"
    -- rebuild all 'bind' settings
    for zname, zkey in pairs(db.rcZonesT()) do
-      bindzonedb(zkey,zname)
+      local zoneT = db.rwZoneT(zkey)
+      if zoneT.recsT then
+         zoneT.recsT=nil -- cleanup old, if any
+         db.rwZoneT(zkey, zoneT)
+      end
+      bindzonedb(zoneT)
    end
-   updateNamedConf()
+   updateNamedConf(db.rcZonesT())
    ba.sleep(1000)
    ba.exec"/etc/init.d/bind9 start"
    acmebotSet(true) -- Start
