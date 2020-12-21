@@ -2,7 +2,8 @@
 
 local rTokensT={} -- key=tokenId, val=datetime
 local elevenHours = (11*60*60) * 1000 -- In milliseconds
-local validateZoneKey = require"ZoneDB".validateZoneKey
+local getZoneName = require"ZoneDB".getZoneName
+local db = require"ZoneDB"
 
 local function sendToken(cmd,rToken,expDatetime)
    cmd:setheader("X-RefreshToken",ba.b64urlencode(rToken))
@@ -16,10 +17,12 @@ local function createTimer(rToken)
 end
 
 local function cmdGetToken(cmd)
-   if not validateZoneKey(cmd:header"X-Key") then
+   if not getZoneName(cmd:header"X-Key") then
       cmd:senderror(404)
       cmd:abort()
    end
+   local dkey=cmd:header"X-Dev"
+   if dkey then db.updateTime4Device(dkey) end
    -- Set 'now' 15 minutes ahead
    local now = ba.datetime"NOW" + {mins=15}
    for rToken,exp in pairs(rTokensT) do

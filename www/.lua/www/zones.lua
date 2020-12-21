@@ -9,15 +9,15 @@ assert(zWebT, ".lua/www/zones.json parse error")
 local menuT=zWebT.menu
 local pagesT=zWebT.pages
 
-local function cmsfunc(_ENV,relpath,zname,zkey)
+local function cmsfunc(_ENV,relpath,zname)
    local path,page
-   if zkey then
+   if zoneT then
       local s = request:session()
       local auth = s and s.authenticated or false -- See login.lsp
       local link = #relpath == 0 and "." or relpath
       local pageT = pagesT[link]
       if not pageT or (not pageT.nologin and not auth) then response:sendredirect"/" end
-      page={link=link,title=pageT.title,menuT=menuT,zname=zname,zkey=zkey,authenticated=auth}
+      page={link=link,title=pageT.title,menuT=menuT,authenticated=auth}
       path=".lua/www/zones/"..pageT.path
       response:setheader("strict-transport-security","max-age=15552000; includeSubDomains")
    else

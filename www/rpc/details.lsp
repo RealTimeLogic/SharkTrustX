@@ -1,23 +1,24 @@
 <?lsp
 
--- Return the DevT (details) as JSON
-
-
 local dname=request:data"name"
-local zkey=app.rcZonesT()[request:header"host"]
-if zkey and dname then
-   local zoneT=app.rwZoneT(zkey)
-   if zoneT then
-      local dkey=zoneT.devices[dname]
-      if dkey then
-         local t=app.rwDeviceT(dkey)
+local db = require"ZoneDB"
+local zoneT=db.znameGetZoneT(request:header"host")
+if zoneT and dname then
+      local devT=db.nameGetDeviceT(zoneT.zid, dname)
+      if devT then
          local s = request:session()
          local auth=s and s.authenticated
-         t.canrem = auth
-         t.dkey = auth and dkey
-         response:json(t)
+         local rsp={
+            info=devT.info,
+            regTime=ba.datetime(devT.regTime):ticks(),
+            accessTime=ba.datetime(devT.accessTime):ticks(),
+            dkey=auth and devT.dkey,
+            canrem = auth,
+         }
+         devT.canrem = auth
+         devT.dkey = auth and dkey
+         response:json(rsp)
       end
-   end
 end
 response:senderror(404)
 

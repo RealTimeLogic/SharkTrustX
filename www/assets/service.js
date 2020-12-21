@@ -14,11 +14,12 @@ const formatString = (str, ...params) => {
 const details=`
 <tr id="details"><td colspan=3>
 <table class="table table-dark"><tbody>
-  <tr><td>Access:</td><td>{0}</td></tr>
-  <tr><td>Details:</td><td>{1}</td></tr>
-  <tr><td>Key:</td><td>{2}</td></tr>
+  <tr><td>Registered:</td><td>{0}</td></tr>
+  <tr><td>Access:</td><td>{1}</td></tr>
+  <tr><td>Details:</td><td>{2}</td></tr>
+  <tr><td>Key:</td><td>{3}</td></tr>
 </tbody></table>
-<div class="mx-auto" style="width: 200px;">{3}</div>
+<div class="mx-auto" style="width: 200px;">{4}</div>
 </td></tr>
 `;
 
@@ -49,7 +50,8 @@ $(function() {
                 lastErrowE=arrowE;
                 trE.after(formatString(
                     details,
-                    (new Date(rsp.atime*1000)).toLocaleString(),
+                    (new Date(rsp.regTime*1000)).toLocaleString(),
+                    (new Date(rsp.accessTime*1000)).toLocaleString(),
                     rsp.info ? rsp.info : "Not provided",
                     rsp.dkey ? rsp.dkey : "Hidden",
                     rsp.canrem ? rembut : ""));

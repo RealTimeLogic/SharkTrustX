@@ -1,11 +1,9 @@
 <h1>Recover Account</h1>
 <?lsp
 local fmt=string.format
-local zname=request:header"host"
-local zkey=app.rcZonesT()[zname]
-local zT=app.rwZoneT(zkey)
-if not zT then response:sendredirect("https://"..app.settingsT.dn) end
+if not zoneT then response:sendredirect("https://"..app.settingsT.dn) end
 local data = request:method() == "POST" and app.xssfilter(app.trim(request:data())) or {}
+local zkey = zoneT.zkey
 
 local function encodeSecCode(code)
    local sbyte=string.byte
@@ -36,8 +34,7 @@ local function manageSetPassword()
       return emitEmailForm"Incorrect Zone Key"
    end
    if data.password and data.password == data.password2 then
-      zT.ha1=app.ha1(zT.uname, data.password)
-      app.rwZoneT(zkey,zT)
+      db.updateAdmPwd(zoneT.zid,app.ha1(zoneT.admEmail, data.password))
       response:sendredirect"/login"
    end
       return emitEmailForm"Passwords do not match"
@@ -86,16 +83,16 @@ end -----------------------------------------
 local function manageSecurityCode()
 ----------------------------------------------
    local secCode=ba.rndbs(16)
-   if data.email and data.email:lower() == zT.uname:lower() then
+   if data.email and data.email:lower() == zoneT.admEmail:lower() then
       local peer = request:peername()
       local function sendEmail()
          local send = require"log".sendmail
          send{
-            subject="Password reset request for "..zname,
-            to=zT.uname,
+            subject="Password reset request for "..zoneT.zname,
+            to=zoneT.admEmail,
             body=fmt("A password reset request has been initiated from %s. You may simply discard this email if you did not initiate this request.\n\nTo reset your password, copy the following Security Code and paste the code into the web form.\n\nSecurity Code: %s", peer, encodeSecCode(secCode))
          }
-         log(false,"Password reset request from %s, originating from %s",zname,peer) 
+         log(false,"Password reset request from %s, originating from %s",zoneT.zname,peer) 
       end
       ba.thread.run(sendEmail)
    end

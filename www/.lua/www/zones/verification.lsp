@@ -12,7 +12,6 @@ local fmt,sbyte=string.format,string.byte
 session.verification = ba.rndbs(6):gsub(".",function(x) return fmt("%02X",sbyte(x)) end)
 if not session.verification then response:sendredirect"/" end
 local zname=request:header"host"
-local zoneT=app.rwZoneT(app.rcZonesT()[zname])
 
 local ebody=[[
 You have requested a secure verification code to view secrets.
@@ -28,7 +27,7 @@ local function sendEmail()
    local send = require"log".sendmail
    send{
       subject="Secure two-step verification notification for "..zname,
-      to=zoneT.uname,
+      to=zoneT.admEmail,
       body=fmt(ebody, session.verification, zname)
    }
    log(false,"Requesting viewing secrets for %s originating from %s",zname,peername) 

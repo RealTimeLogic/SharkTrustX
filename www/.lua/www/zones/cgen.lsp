@@ -16,9 +16,10 @@ response:reset()
 response:setheader("Content-Disposition", 'attachment; filename="tokengen.c"')
 response:setcontenttype("text/plain; charset=utf-8")
 
-local zkey=app.rcZonesT()[request:header"host"]
-local zkeyT=app.rwZoneT(zkey)
-local secret=zkeyT.secret
+local db = require"ZoneDB"
+local zoneT=db.znameGetZoneT(request:header"host")
+if not zoneT then response:sendredirect"/" end
+local secret=zoneT.zsecret
 
 local secretT={}
 for x in secret:gmatch("%x%x") do
@@ -438,7 +439,7 @@ print(table.concat(dataT,",\n"))
 print"};\n"
 
 local zkT={}
-for x in zkey:gmatch("%x%x") do table.insert(zkT, '0x'..x) end
+for x in zoneT.zkey:gmatch("%x%x") do table.insert(zkT, '0x'..x) end
 print(fmt("\tstatic const char zoneKey[] ={\n%s\n};",table.concat(zkT,",")))
 
 print"static int calculateToken(lua_State *L)\n{"
@@ -484,7 +485,7 @@ static int zoneInfo(lua_State *L)
 {
 ]]
 local znT={}
-for x in zkeyT.zname:gmatch(".") do table.insert(znT, x) end
+for x in zoneT.zname:gmatch(".") do table.insert(znT, x) end
 print(fmt("\tstatic const char zoneName[] ={\n'%s'\n};",table.concat(znT,"','")))
 
 

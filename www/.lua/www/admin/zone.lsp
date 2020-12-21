@@ -3,28 +3,23 @@
 local data=request:data()
 
 local zname=data.name
-local zkey=app.rcZonesT()[zname]
-if not zkey then response:sendredirect"manage" end
-
 if request:method() == "POST" and data.terminate == "yes" then
   app.deleteZone(zname)
   response:sendredirect"manage"
 end
-
-local zoneT=app.rwZoneT(zkey)
-
-local dCount=0
-for _ in pairs(zoneT.devices) do dCount = dCount + 1 end
+local db = require"ZoneDB"
+local zoneT=db.znameGetZoneT(zname)
+if not zname then response:sendredirect"/" end
 ?>
 <h1>Zone Information</h1>
 <div class="card card-body bg-light">
   <div class="alert alert-success" role="alert">
    <table>
    <tr><td>Domain:</td><td><?lsp=string.format("<a href='https://%s'>https://%s</a>",zname,zname)?></td></tr>
-   <tr><td>Owner:</td><td><?lsp=zoneT.uname?></td></tr>
-   <tr><td>Registered:</td><td><?lsp=os.date("%c",zoneT.rtime)?></td></tr>
-   <tr><td>Devices:</td><td><?lsp=dCount?></td></tr>
-   <tr><td>Zone Key:</td><td><?lsp=zkey?></td></tr>
+   <tr><td>Owner:</td><td><?lsp=zoneT.admEmail?></td></tr>
+   <tr><td>Registered:</td><td><?lsp=zoneT.regTime?></td></tr>
+   <tr><td>Devices:</td><td><?lsp=db.countDevices4Zone(zoneT.zid)?></td></tr>
+   <tr><td>Zone Key:</td><td><?lsp=zoneT.zkey?></td></tr>
    </table>
    </div>
   <div class="form-group">&nbsp;</div>

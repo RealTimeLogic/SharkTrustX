@@ -2,7 +2,7 @@
  local ispost = request:method() == "POST"
  if ispost then
     local data=request:data()
-    if app.checkCredentials(app.rwZoneT(page.zkey), data.ba_username, data.ba_password) then
+    if app.checkCredentials(zoneT, data.ba_username, data.ba_password) then
        request:session(true).authenticated=true
        response:sendredirect"/manage"
     end

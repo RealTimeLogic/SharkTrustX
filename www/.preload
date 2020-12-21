@@ -3,6 +3,17 @@ local hio=ba.openio"home"
 local rw=require"rwfile"
 local fmt=string.format
 local sbyte=string.byte
+local baexec=ba.exec
+
+-- For test purposes only
+local iswin=(function()
+   local _,type=hio:resourcetype()
+   if type == "windows" then
+      baexec=function(ex) trace("Dummy exec:",ex) return 0 end
+      return true
+   end
+end)()
+
 
 mako.createloader(io)
 
@@ -14,6 +25,14 @@ if mako.daemon then -- If deployed
    require"seed" -- seed sharkssl and rnd generators.
 end
 
+-- Manually load and insert ZoneDB (used by other modules).
+local db=io:dofile(".lua/ZoneDB.lua",_ENV) -- Requires env:io
+package.loaded.ZoneDB=db -- insert as module
+
+-- Convert old JSON based DB to SQL DB, if any
+io:dofile".lua/Json2DB.lua"(ba.mkio(hio,"data"))
+
+local certUpdater=require"CertUpdater"
 local conf=require"loadconf"
 local settingsT=conf.settings
 local ok,err=pcall(function()
@@ -25,8 +44,8 @@ if not ok then
    error"Invalid 'settings' table in mako.conf"
 end
 
-assert(type(conf.log.smtp.to=="string", "mako.conf missing log.smpt.to"))
-local email=conf.log.smtp.to
+local admEmail=conf.log.smtp.to
+assert(type(admEmail=="string", "mako.conf missing log.smpt.to"))
 
 settingsT.ipns1,settingsT.ipns2=
    ba.socket.toip(settingsT.ns1),ba.socket.toip(settingsT.ns2)
@@ -47,7 +66,7 @@ local serverIP,hostname = (function()
 end)()
 
 
-log=function(iserr,fmts,...)
+local function log(iserr,fmts,...)
    local msg=fmt("BACME: "..fmts,...)
    tracep(false,iserr and 0 or 2,msg)
    if mako.daemon then
@@ -58,7 +77,6 @@ log=function(iserr,fmts,...)
 end
 _G.log = log -- Make global. Used by other modules and LSP pages.
 
-local db=require"ZoneDB"
 local rtm = require"RefreshTokenManager"
 local PBKDF2Cache = require"PBKDF2Cache".getDK
 
@@ -115,9 +133,8 @@ end
 -- Execute command 'cmd' in /usr/sbin/ with 'args'
 local function execsbin(cmd,args)
    cmd=fmt("/usr/sbin/%s %s",cmd,args)
-   local resp,ecode=ba.exec(cmd)
+   local resp,ecode=baexec(cmd)
    if ecode ~= 0 then
-      log(true,"exec err %d for %s",ecode,cmd)
    end
    return {cmd=cmd,resp=resp,ecode=ecode}
 end
@@ -138,10 +155,10 @@ file "/etc/bind/zones/%s.db";
 };
 
 ]]
-local function updateNamedConf(zonesT)
+local function updateNamedConf()
    local fp=_G.io.open("/etc/bind/named.conf.local","w")
    assert(fp, "'bind9' must be installed")
-   for zname in pairs(zonesT or db.rcZonesT()) do
+   for zid,zname in db.getZonesT() do
       fp:write(fmt(namedConfFmt,zname,zname))
    end
    fp:close()
@@ -183,21 +200,16 @@ local function bindzonedb(zoneT, acmeRecT)
    local function emitRec(name,class,type,data)
       fp:write(fmt("%s %s %s %s\n",name,class,type,data))
    end
-   local function laddr(devT) emitRec(devT.name,"IN","A",devT.ip) end
-   local function waddr(devT) emitRec(devT.name,"IN","A",devT.wan) end
+   local function laddr(devT) emitRec(devT.name,"IN","A",devT.localAddr) end
+   local function waddr(devT) emitRec(devT.name,"IN","A",devT.wanAddr) end
    -- Ref-RR: Set device A record to local IP, WAN IP, or both (Round Robin)
    local actionT={
       ["local"]=laddr,
       wan=waddr,
       both=function(devT) laddr(devT) waddr(devT) end
    }
-   for dname,dkey in pairs(zoneT.devices) do
-      local devT,fn=db.rwDeviceT(dkey)
-      if devT then
-         actionT[devT.dns](devT)
-      else
-         log(TRUE, "Corrupt DB, missing %s for %s", fn, dname)
-      end
+   for devT in db.getDevices4ZoneT(zoneT.zid) do
+      actionT[devT.dns](devT)
    end
    if acmeRecT then
       for k,v in pairs(acmeRecT) do
@@ -207,62 +219,75 @@ local function bindzonedb(zoneT, acmeRecT)
    fp:close()
 end
 
-
--- creates/renews and loads all certs for the registered zones
--- (domains), but not for the devices.
-local function acmebotSet(delay)
-   local function action()
-      local zList={settingsT.dn,hostname}
-      for zname in pairs(db.rcZonesT()) do table.insert(zList,zname) end
-      local a=settingsT.acme
-      local op={
-         cleanup=true,
-         production=a.production,
-         rsa=a.rsa,
-         acceptterms=true
-      }
-      local ab=require"acme/bot"
-      ab.configure(email,zList,op)
-      ab.start()
+-- Returns (and creates) the recsT, which may initially be nil.
+-- RecsT[zid] contains a table with record-name (key) and data (value)
+local zonesRecsT={}
+local function getRecsTfromZoneT(zoneT, key)
+   local recsT = zonesRecsT[zoneT.zid]
+   if not recsT then
+      recsT={}
+      zonesRecsT[zoneT.zid]=recsT
    end
-   if delay then
-      -- Give 'bind' time to settle after running 'rndc reconfig'.
-      ba.timer(action):set(3000,true)
+   if key then
+      local t = recsT[key]
+      if not t then t={}  recsT[key]=t end
+      return recsT, t
+   end
+   return recsT
+end
+
+-- Update the 'bind' database file containing all zones and tell
+-- 'bind' to reload DB.
+local function bindUpdateZone(zoneT)
+   local recsT=getRecsTfromZoneT(zoneT)
+   local extraRecsT={}
+   for _,recT in pairs(recsT) do
+      for k, v in pairs(recT) do
+         extraRecsT[k]=v
+      end
+   end
+   bindzonedb(zoneT, extraRecsT)
+   execsbin("rndc","reload "..zoneT.zname)
+end
+
+
+-- Called from CertUpdater.lua when performing DNS challenge and a DNS
+-- record  ACME challenge must be set
+local function setDnsRec(domain, dnsRecord, dnsAuth)
+   local zoneT = db.znameGetZoneT(domain)
+   if zoneT then
+      -- We use dnsRecord as key, which is OK since it is unique -- a fully qulified name
+      local recsT,recT = getRecsTfromZoneT(zoneT, dnsRecord)
+      recT[dnsRecord]=dnsAuth
+      bindUpdateZone(zoneT)
    else
-      action()
+      log(true,"No ZoneT for %s",domain)
    end
 end
 
 
-local function create64btHexKey()
-   return ba.rndbs(32):gsub(".",function(x) return fmt("%02X",sbyte(x)) end)
+-- Called from CertUpdater.lua at end of DNS challenge
+-- Remove DNS ACME challenge record
+local function remDnsRec(domain, dnsRecord)
+   local zoneT = db.znameGetZoneT(domain)
+   if not zoneT then return end
+   local recsT=getRecsTfromZoneT(zoneT)
+   recsT[dnsRecord] = nil
+   bindUpdateZone(zoneT)
 end
+
 
 local function createZone(zname, uname, pwd)
-   local ha1=ha1(uname, pwd)
-   local zonesT = db.rcZonesT() -- key=name, val='64b-account-key'
-   if zonesT[zname] then return nil, "already exists" end
-   -- Build zones table, but set 64b-account-key as key and zname as value.
-   local kZonesT={}
-   for zname,zkey in pairs(zonesT) do kZonesT[zkey]=zname end
-   -- Find new unique 64b-account-key
-   local zkey
-   while true do
-      zkey=create64btHexKey()
-      if not kZonesT[zkey] then break end
-   end
-   local zoneT={uname=uname,ha1=ha1,zname=zname,
-      rtime=os.time(),devices={},secret=create64btHexKey()}
-   -- Store new zone and save
-   db.rwZoneT(zkey, zoneT)
-   zonesT[zname]=zkey
-   db.wZonesT(zonesT)
-   bindzonedb(zoneT)
-   updateNamedConf(zonesT)
+   if db.getZoneKey(zname) then return nil, "zone exists" end
+   local zoneT
+   zoneT=db.addZone(zname, uname, ha1(uname, pwd), function()
+      updateNamedConf()
+      bindzonedb(zoneT)
+   end)
    execsbin("rndc","reconfig")
-   acmebotSet(true)
+   certUpdater.addZone(zname)
    log(false, "New zone %s : %s", zname, uname)
-   return zkey
+   return zoneT.zkey
 end
 
 
@@ -276,76 +301,26 @@ end
 -- Login for the zone admin, one admin per zone.
 -- Note: System admins can also log in to any zone
 function app.checkCredentials(zoneT, uname, pwd)
-   return zoneT and zoneT.ha1 == ha1(uname or "",pwd or "") or
+   return zoneT and zoneT.admPwd == ha1(uname or "",pwd or "") or
       app.checkAdminCredentials(uname, pwd) -- Check system if not zone adm.
 end
 
 
--- Returns (and creates) the recsT, which may initially be nil.
--- RecsT[zkey] is a table with record-name (key) and data (value)
-local function getRecsTfromZoneT(zoneT, dkey)
-   local recsT = zoneT.recsT
-   if not recsT then
-      recsT={}
-      zoneT.recsT=recsT
-   end
-   if dkey then
-      local t = recsT[dkey]
-      if not t then t={}  recsT[dkey]=t end
-      return recsT, t
-   end
-   return recsT
-end
-
-
--- Update the 'bind' database file containing all zones and tell
--- 'bind' to reload DB.
-local function updateZone(zoneT)
-   local recsT=getRecsTfromZoneT(zoneT)
-   local extraRecsT={}
-   for _,recT in pairs(recsT) do
-      for k, v in pairs(recT) do
-         extraRecsT[k]=v
-      end
-   end
-   bindzonedb(zoneT, extraRecsT)
-   execsbin("rndc","reload "..zoneT.zname)
-end
-
 -- Deletes all data related to zone
 local function deleteZone(zname)
-   local resp={}
-   local zonesT=db.rcZonesT()
-   local zkey=zonesT[zname]
+   local zkey=db.getZoneKey(zname)
    if not zkey then
       return log(true, "Terminating zone warn: cannot find %s",zname)
    end
-   zonesT[zname]=nil
-   db.wZonesT(zonesT)
-   db.deleteZone(zkey)
+   db.removeZone(zkey)
    os.remove(mkFullZname(zname)) -- Delete bind's zone config file
-   updateNamedConf(zonesT)
+   updateNamedConf()
    execsbin("rndc","reconfig")
-   acmebotSet() -- Load zone (domain) certs minus the one we deleted
+   certUpdater.removeZone(zname)
 end
 
-local function deleteDevice(zname, zkey, dname, dkey)
-   local zoneT=db.rwZoneT(zkey)
-   local wansT=db.rwWanT(zkey)
-   local devT=db.rwDeviceT(dkey)
-   if zoneT and wansT and devT then
-      local wanT=wansT[devT.wan]
-      if wanT then
-         wanT[dname]=nil
-         zoneT.devices[dname]=nil
-         db.rwZoneT(zkey,zoneT)
-         db.rwWanT(zkey,wansT)
-         db.rmDevice(dkey)
-         updateZone(zoneT)
-         return true
-      end
-   end
-   error"deleteDevice: not found"
+local function deleteDevice(zoneT, dkey)
+   db.removeDevice(dkey, function() bindUpdateZone(zoneT) end)
 end
 
 -----------------------------------------------------------------------
@@ -382,7 +357,7 @@ end
 local function lookupDev(cmd,hT)
    local dkey=hT["X-Dev"]
    if not dkey then return errorRsp(cmd, 400, "No X-Dev") end
-   local devT = db.rwDeviceT(dkey)
+   local devT = db.keyGetDeviceT(dkey)
    if not devT then return errorRsp(cmd,404,"Unknown X-Dev") end
    return dkey, devT
 end
@@ -422,26 +397,9 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    local name=getName(cmd,hT,zoneT)
    if not name then return end
    -- Make sure sub-domain name is unique by checking name conflict in nameT
-   local nameT,ix,orgn=zoneT.devices,0,name
-   while nameT[name] do ix=ix+1 name=fmt("%s%d",orgn,ix) end
-   local wan=peername(cmd)
-   local info=hT["X-Info"]
-   if info and #info > 40 then info=info:sub(1,40) end
-   local devT={ -- New
-      atime=os.time(),
-      dns=getDnsType(hT),
-      info=info or "",
-      ip=ip,
-      name=name,
-      wan=wan,
-   }
-   -- Create a unique device key (X-Dev)
-   local dkey = db.createDeviceKey()
-   zoneT.devices[name]=dkey -- Add new
-   db.rwZoneT(zkey,zoneT) -- Insert new device in zone table
-   db.updateWanT(zkey,name,ip,wan) -- Insert new device in zone wan table
-   db.rwDeviceT(dkey, devT) -- Save new device
-   updateZone(zoneT) -- Update bind
+   local ix,orgn=0,name
+   while db.nameGetDeviceT(zoneT.zid,name) do ix=ix+1 name=fmt("%s%d",orgn,ix) end
+   local dkey=db.addDevice(zoneT.zkey,name,ip,peername(cmd),getDnsType(hT),info or "", function() bindUpdateZone(zoneT) end)
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
 
@@ -468,17 +426,11 @@ local function cmdSetIpAddress(cmd,hT,zkey,zoneT)
    local ip=getAndCheckIp(cmd,hT)
    if not ip then return end
    local wan=peername(cmd)
-   devT.atime=os.time()
    local dtype=getDnsType(hT)
-   if devT.ip~=ip or devT.wan~=wan or devT.dns~=dtype then
-      db.updateWanT(zkey,devT.name,ip,wan,devT.wan) -- Update zone wan table
-      devT.ip=ip
-      devT.wan=wan
-      devT.dns=dtype
-      db.rwDeviceT(dkey,devT) -- Save devT changes
-      updateZone(zoneT)  -- Update bind
+   if devT.localAddr~=ip or devT.wanAddr~=wan or devT.dns~=dtype then
+      db.updateAddress4Device(dkey,ip,wan,dns,function() bindUpdateZone(zoneT) end)
    else
-      db.rwDeviceT(dkey,devT) -- Save updated devT.atime
+      db.updateTime4Device(dkey)
    end
    rsp(cmd, {["X-Name"]=fmt("%s.%s",devT.name,zoneT.zname)})
 end
@@ -490,12 +442,10 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
    local rname=hT['X-RecordName']
    local rdata=hT['X-RecordData']
    if not rname or not rdata then return errorRsp(cmd,400,"Invalid command") end
-   devT.atime=os.time()
-   db.rwDeviceT(dkey,devT) -- Save devT changes
+   db.updateTime4Device(dkey)
    local recsT,recT = getRecsTfromZoneT(zoneT, dkey)
    recT[rname]=rdata
-   db.rwZoneT(zkey, zoneT)
-   updateZone(zoneT)
+   bindUpdateZone(zoneT)
    rsp(cmd)
 end
 
@@ -505,8 +455,7 @@ local function cmdRemoveAcmeRecord(cmd,hT,zkey,zoneT)
    if not dkey then return end
    local recsT=getRecsTfromZoneT(zoneT)
    recsT[dkey] = nil
-   db.rwZoneT(zkey, zoneT)
-   updateZone(zoneT)
+   bindUpdateZone(zoneT)
    rsp(cmd)
 end
 
@@ -547,9 +496,9 @@ local function command(cmd)
    if not rtm.tokenValid(rtoken) then
       return errorRsp(cmd,403, "Invalid RefreshToken")
    end
-   local zoneT = db.rwZoneT(zkey)
+   local zoneT = db.zkeyGetZoneT(zkey)
    if not zoneT then return errorRsp(cmd,404, "Invalid X-Key") end
-   local dk = PBKDF2Cache(zkey, zoneT.secret)
+   local dk = PBKDF2Cache(zkey, zoneT.zsecret)
    if token ~= ba.crypto.hash"sha256"(hash)(dk)(serverIP)(rtoken)(true,"binary") then
       return errorRsp(cmd,403, "Invalid token")
    end
@@ -572,26 +521,32 @@ end
 -----------------------------------------------------------------------
 
 local function delayedLoad()
-   assert(string.find(ba.exec"whoami", "root"),
+   assert(string.find(baexec"whoami", "root") or iswin==true,
           "Server must run as user root!!!")
-   local xio=ba.openio"disk"
+   local xio=ba.openio(iswin and "home" or "disk")
+   --If testing on win
+   if iswin then xio:mkdir"etc" xio:mkdir"etc/bind" xio:mkdir"etc/bind/zones" end
    if (not xio:stat"/etc/bind/zones/" and not xio:mkdir"/etc/bind/zones/") then
       error"Cannot access /etc/bind/zones/"
    end
-   ba.exec"/etc/init.d/bind9 stop"
+   baexec"/etc/init.d/bind9 stop"
    -- rebuild all 'bind' settings
-   for zname, zkey in pairs(db.rcZonesT()) do
-      local zoneT = db.rwZoneT(zkey)
-      if zoneT.recsT then
-         zoneT.recsT=nil -- cleanup old, if any
-         db.rwZoneT(zkey, zoneT)
-      end
+   for zid,zname,zkey in db.getZonesT() do
+      local zoneT = db.znameGetZoneT(zname)
       bindzonedb(zoneT)
+      certUpdater.addZone(zname)
    end
-   updateNamedConf(db.rcZonesT())
+   updateNamedConf()
    ba.sleep(1000)
-   ba.exec"/etc/init.d/bind9 start"
-   acmebotSet(true) -- Start
+   baexec"/etc/init.d/bind9 start"
+   local a=settingsT.acme
+   local acmeOP={
+      production=a.production,
+      rsa=a.rsa,
+      acceptterms=true,
+   }
+   local domainsL={settingsT.dn,hostname}
+   certUpdater.start(domainsL, setDnsRec, remDnsRec,admEmail,acmeOP)
    log(false, "Ready %s", os.date())
 end
 ba.thread.run(delayedLoad)
@@ -602,11 +557,8 @@ app.createZone = createZone
 app.deleteDevice=deleteDevice
 app.deleteZone = deleteZone
 app.peername = peername
-app.rcZonesT = db.rcZonesT
-app.rwDeviceT = db.rwDeviceT
-app.rwWanT = db.rwWanT
-app.rwZoneT = db.rwZoneT
 app.settingsT = settingsT
+
 -- Converts UTC time to UNIX time
 function app.convertUTCTime(tm)
    if type(tm) == "string" then
@@ -643,8 +595,10 @@ local function cmsfunc(_ENV,relpath)
    local host = request:header"host"
    if not host then response:senderror(404) return end
    if not request:issecure() then response:sendredirect("https://"..host,true) end
+   _ENV.db=db
    if host == serviceName then return adminDir(_ENV,relpath) end
-   return zonesDir(_ENV,relpath, host, db.rcZonesT()[host])
+   _ENV.zoneT=db.znameGetZoneT(host)
+   return zonesDir(_ENV,relpath, host)
 end
 local cmsdir=ba.create.dir()
 cmsdir:setfunc(cmsfunc)

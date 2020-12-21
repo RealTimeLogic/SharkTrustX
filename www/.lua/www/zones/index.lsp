@@ -1,6 +1,10 @@
 <?lsp
-local wanT = ((app.rwWanT(page.zkey) or {})[app.peername(request)] or {})
-if not next(wanT) then
+
+local devsTL={}
+for devT in db.getDevices4Wan(zoneT.zid,app.peername(request) or "") do
+   table.insert(devsTL,devT)
+end
+if #devsTL == 0 then
    response:write'<h1>No Devices</h1><p>No devices are registered in your location.</p>'
    return
 end
@@ -12,9 +16,9 @@ end
   <tbody class="devtab">
 <?lsp
    local zname=page.zname
-   for dname,ip in pairs(wanT) do
-      response:write('<tr><td><a class="name" href="https://',dname,'.',zname,'">',dname,
-                     '</a></td><td>',ip,'</td><td class="info"><div class="arrow darrow"></div></td></tr>')
+   for _,devT in ipairs(devsTL) do
+      response:write('<tr><td><a class="name" href="https://',devT.name,'.',zoneT.zname,'">',devT.name,
+                     '</a></td><td>',devT.localAddr,'</td><td class="info"><div class="arrow darrow"></div></td></tr>')
    end
 ?>
   </tbody>

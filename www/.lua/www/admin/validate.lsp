@@ -136,7 +136,7 @@ if request:method()=="POST" then
       local t=ba.json.decode(app.aesdecode(data.v) or "")
       if t then
          local email,domain=t.e,t.d
-         if app.rcZonesT()[domain] then return emitAlreadyReg() end
+         if db.getZoneKey(domain) then return emitAlreadyReg() end
          if data.password and data.password == data.password2 then
             local zkey=app.createZone(domain, email, data.password)
             local function send()

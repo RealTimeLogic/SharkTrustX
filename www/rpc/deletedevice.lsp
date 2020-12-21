@@ -9,16 +9,14 @@ end
 
 local dname=request:data"name"
 local zname=request:header"host"
-local zkey=app.rcZonesT()[zname]
-if zkey and dname then
-   local zoneT=app.rwZoneT(zkey)
-   if zoneT then
-      local dkey=zoneT.devices[dname]
-      if dkey then
-         app.deleteDevice(zname, zkey, dname, dkey)
+local db = require"ZoneDB"
+local zoneT=db.znameGetZoneT(zname)
+if zoneT and dname then
+      local devT=db.nameGetDeviceT(zoneT.zid, dname)
+      if devT then
+         app.deleteDevice(zoneT, devT.dkey)
          response:json{ok=true}
       end
-   end
 end
 response:senderror(404)
 
