@@ -1,4 +1,5 @@
 local db=[[
+PRAGMA foreign_keys = on;
 CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
 INSERT INTO config (key, value) values("version", "1.0");
 INSERT INTO config (key, value) values("rootUser","");
@@ -31,6 +32,14 @@ CREATE TABLE users(
    poweruser INTEGER,
    zid INTEGER,
    FOREIGN KEY (zid) REFERENCES zones(zid));
+
+CREATE TABLE UsersDevAccess(
+   did INTEGER UNIQUE,
+   uid INTEGER UNIQUE,
+   FOREIGN KEY (did) REFERENCES devices(did),
+   FOREIGN KEY (uid) REFERENCES users(uid));
+
+CREATE UNIQUE INDEX UsersDevAccessIx ON UsersDevAccess (did, uid);
 ]]
 
 
@@ -46,19 +55,19 @@ end
 
 
 local function openDB()
-   local ok
+   local ok,err,err2
    local su=require"sqlutil"
    local hasDB = su.exist("zones")
    local env,conn=su.open("zones")
    if hasDB then
-      ok,err = updateDB(conn)
+      ok,err,err2 = updateDB(conn)
    else
-      ok,err = createDB(conn)
+      ok,err,err2 = createDB(conn)
    end
    if ok then return env,conn end
    conn:close()
    env:close()
-   error(string.format("Cannot open zones db: %s",err))
+   error(string.format("Cannot open zones db: %s",err,err2))
 end
 
 return openDB

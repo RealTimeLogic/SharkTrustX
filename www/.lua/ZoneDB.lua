@@ -9,6 +9,7 @@ end
 local env,dbExec,getWConn = (function()
    local env, wconn = io:dofile".lua/CreateDB.lua"()
    assert(env, fmt("Cannot open zones.db: %s", wconn))
+   assert(wconn:execute"PRAGMA foreign_keys = on;")
    assert(wconn:setautocommit "IMMEDIATE")
 
    local function commit()
@@ -28,9 +29,11 @@ local env,dbExec,getWConn = (function()
     
    local dbthread = ba.thread.create()
    local function dbExec(sql,noCommit,func)
-      dbthread:run(function() checkExec(sql,wconn:execute(sql)) end)
-      if not noCommit then dbthread:run(commit) end
-      if func then dbthread:run(func) end
+      dbthread:run(function()
+         checkExec(sql,wconn:execute(sql))
+         if not noCommit then commit() end
+         if func then func() end
+      end)
    end
    return env,dbExec,function() return wconn end
 end)()
