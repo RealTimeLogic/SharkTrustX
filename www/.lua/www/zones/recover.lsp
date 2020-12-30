@@ -1,9 +1,9 @@
-<h1>Recover Account</h1>
+<h2>Recover Account</h2>
 <?lsp
 local fmt=string.format
-if not zoneT then response:sendredirect("https://"..app.settingsT.dn) end
 local data = request:method() == "POST" and app.xssfilter(app.trim(request:data())) or {}
 local zkey = zoneT.zkey
+local db = require"ZoneDB"
 
 local function encodeSecCode(code)
    local sbyte=string.byte
@@ -30,14 +30,21 @@ local function emitEmailForm(emsg)
 end -----------------------------------------
 
 local function manageSetPassword()
-   if zkey ~= data.zkey or app.aesdecode(data.PrivSecCode or "") ~= data.SecCode then
+   local email=app.aesdecode(data.xemail)
+   local isAdm = email == zoneT.admEmail:lower()
+   if (isAdm and zkey ~= data.zkey) or app.aesdecode(data.PrivSecCode or "") ~= data.SecCode then
       return emitEmailForm"Incorrect Zone Key"
    end
    if data.password and data.password == data.password2 then
-      db.updateAdmPwd(zoneT.zid,app.ha1(zoneT.admEmail, data.password))
+      local ha1Pwd = app.ha1(email, data.password)
+      if isAdm then
+         db.updateAdmPwd(zoneT.zid,ha1Pwd)
+      else
+         db.updateUSerPwd(zoneT.zid, email, ha1Pwd)
+      end
       response:sendredirect"/login"
    end
-      return emitEmailForm"Passwords do not match"
+   return emitEmailForm"Passwords do not match"
 end
 
 local function managePasswordForm()
@@ -48,10 +55,12 @@ local function managePasswordForm()
 ?>
 <div class="card card-body bg-light">
   <form id="pwdform" method="post">
+    <?lsp if app.aesdecode(data.xemail) == zoneT.admEmail:lower() then ?>
     <div class="form-group">
       <label for="zkey">Enter the 64 byte long zone key:</label>
       <input type="text" name="zkey" class="form-control" id="zkey" placeholder="Enter your Zone Key" autofocus required tabindex="1">
     </div>
+    <?lsp end ?>
     <div class="form-group">
       <label for="password">New Password:</label>
       <input class="form-control" placeholder="Enter new password" type="password" id="password" name="password" minlength="8" autofocus nowhitespace="true" tabindex="2" />
@@ -63,6 +72,7 @@ local function managePasswordForm()
     <input type="hidden" name="state" value="SetPassword" />
     <input type="hidden" name="PrivSecCode" value="<?lsp=app.aesencode(data.SecCode)?>" />
     <input type="hidden" name="SecCode" value="<?lsp=data.SecCode?>" />
+    <input type="hidden" name="xemail" value="<?lsp=data.xemail?>" />
     <input type="submit" class="btn btn-primary btn-block" value="Set New Password" tabindex="4">
   </form>
 </div>
@@ -83,16 +93,17 @@ end -----------------------------------------
 local function manageSecurityCode()
 ----------------------------------------------
    local secCode=ba.rndbs(16)
-   if data.email and data.email:lower() == zoneT.admEmail:lower() then
+   local email = data.email and data.email:lower()
+   if email and (db.getUserT(zoneT.zid, email) or email == zoneT.admEmail:lower()) then
       local peer = request:peername()
       local function sendEmail()
          local send = require"log".sendmail
          send{
             subject="Password reset request for "..zoneT.zname,
-            to=zoneT.admEmail,
+            to=email,
             body=fmt("A password reset request has been initiated from %s. You may simply discard this email if you did not initiate this request.\n\nTo reset your password, copy the following Security Code and paste the code into the web form.\n\nSecurity Code: %s", peer, encodeSecCode(secCode))
          }
-         log(false,"Password reset request from %s, originating from %s",zoneT.zname,peer) 
+         log(false,"Password reset request for zone %s and user %s, originating from %s",zoneT.zname,email,peer) 
       end
       ba.thread.run(sendEmail)
    end
@@ -104,6 +115,7 @@ local function manageSecurityCode()
       <input type="text" name="SecCode" class="form-control" id="SecCode" placeholder="Enter your Security Code" autofocus required tabindex="1">
       <input type="hidden" name="state" value="PasswordForm" />
       <input type="hidden" name="PrivSecCode" value="<?lsp=app.aesencode(secCode)?>" />
+      <input type="hidden" name="xemail" value="<?lsp=app.aesencode(email or "")?>" />
     </div>
     <input type="submit" class="btn btn-primary btn-block" value="Submit" tabindex="2">
   </form>

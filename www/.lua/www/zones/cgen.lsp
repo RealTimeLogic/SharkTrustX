@@ -16,7 +16,6 @@ response:reset()
 response:setheader("Content-Disposition", 'attachment; filename="tokengen.c"')
 response:setcontenttype("text/plain; charset=utf-8")
 
-local db = require"ZoneDB"
 local zoneT=db.znameGetZoneT(request:header"host")
 if not zoneT then response:sendredirect"/" end
 local secret=zoneT.zsecret

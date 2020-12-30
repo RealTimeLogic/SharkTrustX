@@ -15,13 +15,31 @@ const details=`
 <tr id="details"><td colspan=3>
 <table class="table table-dark"><tbody>
   <tr><td>Registered:</td><td>{0}</td></tr>
-  <tr><td>Access:</td><td>{1}</td></tr>
+  <tr><td>Last Access:</td><td>{1}</td></tr>
   <tr><td>Details:</td><td>{2}</td></tr>
   <tr><td>Key:</td><td>{3}</td></tr>
 </tbody></table>
 <div class="mx-auto" style="width: 200px;">{4}</div>
 </td></tr>
 `;
+
+
+const detailsRC=`
+<tr id="details"><td colspan=3>
+<table class="table table-dark"><tbody>
+  <tr><td>Registered:</td><td>{0}</td></tr>
+  <tr><td>Last Access:</td><td>{1}</td></tr>
+  <tr><td>Details:</td><td>{2}</td></tr>
+  <tr><td>Key:</td><td>{3}</td></tr>
+  <tr><td>RC Sub-DN:</td><td>{4}</td></tr>
+  <tr><td>RC Active:</td><td>{5}</td></tr>
+  <tr><td>RC Last Connection:</td><td>{6}</td></tr>
+  <tr><td>RC Active Conns:</td><td>{7}</td></tr>
+</tbody></table>
+<div class="mx-auto" style="width: 200px;">{8}</div>
+</td></tr>
+`;
+
 
 const rembut=
     '<button type="button" class="btn btn-danger">Remove Device</button>';
@@ -48,13 +66,32 @@ $(function() {
             $.getJSON("rpc/details.lsp", {name:name}, function(rsp) {
                 arrowE.removeClass("darrow").addClass("uarrow");
                 lastErrowE=arrowE;
-                trE.after(formatString(
-                    details,
-                    (new Date(rsp.regTime*1000)).toLocaleString(),
-                    (new Date(rsp.accessTime*1000)).toLocaleString(),
-                    rsp.info ? rsp.info : "Not provided",
-                    rsp.dkey ? rsp.dkey : "Hidden",
-                    rsp.canrem ? rembut : ""));
+                console.log(rsp.canrem);
+                if(rsp.dz)
+                {
+                    trE.after(formatString(
+                        detailsRC,
+                        (new Date(rsp.regTime*1000)).toLocaleString(),
+                        (new Date(rsp.accessTime*1000)).toLocaleString(),
+                        rsp.info ? rsp.info : "Not provided",
+                        rsp.dkey ? rsp.dkey : "Hidden",
+                        rsp.dz,
+                        rsp.active ? "Yes" : "No",
+                        (new Date(rsp.lastActiveTime*1000)).toLocaleString(),
+                        rsp.activeCons,
+                        rsp.canrem ? rembut : ""
+                        ));
+                }
+                else
+                {
+                    trE.after(formatString(
+                        details,
+                        (new Date(rsp.regTime*1000)).toLocaleString(),
+                        (new Date(rsp.accessTime*1000)).toLocaleString(),
+                        rsp.info ? rsp.info : "Not provided",
+                        rsp.dkey ? rsp.dkey : "Hidden",
+                        rsp.canrem ? rembut : ""));
+                }
                 if(rsp.canrem) {
                     trE.next().find("button").click(function() {
                         $.getJSON("rpc/deletedevice.lsp", {name:name},

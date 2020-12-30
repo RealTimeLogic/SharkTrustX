@@ -124,6 +124,7 @@ end
 local function loadCert(certsL,nameT,wildcard)
    for name in pairs(nameT) do
       local cert = rCert(name,wildcard)
+      trace("loadCert",name,wildcard, cert and "YES" or "NO")
       if cert then
          table.insert(certsL, cert)
       else

@@ -12,7 +12,8 @@ CREATE TABLE zones(
    admPwd TEXT,
    admEmail TEXT,
    zkey TEXT,
-   zsecret TEXT);
+   zsecret TEXT,
+   autoReg INTEGER);
 CREATE TABLE devices(
    did INTEGER PRIMARY KEY,
    name TEXT,
@@ -27,15 +28,15 @@ CREATE TABLE devices(
    FOREIGN KEY (zid) REFERENCES zones(zid));
 CREATE TABLE users(
    uid INTEGER PRIMARY KEY,
-   email TEXT,
+   email TEXT UNIQUE,
    pwd TEXT,
    poweruser INTEGER,
    zid INTEGER,
    FOREIGN KEY (zid) REFERENCES zones(zid));
 
 CREATE TABLE UsersDevAccess(
-   did INTEGER UNIQUE,
-   uid INTEGER UNIQUE,
+   did INTEGER,
+   uid INTEGER,
    FOREIGN KEY (did) REFERENCES devices(did),
    FOREIGN KEY (uid) REFERENCES users(uid));
 
@@ -47,9 +48,11 @@ local function updateDB(conn)
    return true
 end
 
-local function createDB(conn)
+local function createDB(conn,quotestr)
    local ok,err,serr=conn:mexec(db)
    if not ok then trace(err,serr) end
+   -- Convert old JSON based DB to SQL DB, if any
+   io:dofile".lua/Json2DB.lua"(conn,quotestr)
    return ok,err
 end
 
@@ -62,7 +65,7 @@ local function openDB()
    if hasDB then
       ok,err,err2 = updateDB(conn)
    else
-      ok,err,err2 = createDB(conn)
+      ok,err,err2 = createDB(conn,env.quotestr)
    end
    if ok then return env,conn end
    conn:close()

@@ -29,9 +29,6 @@ end
 local db=io:dofile(".lua/ZoneDB.lua",_ENV) -- Requires env:io
 package.loaded.ZoneDB=db -- insert as module
 
--- Convert old JSON based DB to SQL DB, if any
-io:dofile".lua/Json2DB.lua"(ba.mkio(hio,"data"))
-
 local certUpdater=require"CertUpdater"
 local conf=require"loadconf"
 local settingsT=conf.settings
@@ -183,8 +180,11 @@ ns2.%s.   86400 IN      A       %s
 %s. 86400 IN A %s
 %s. 86400 IN A %s
 ]]
+
+local RevConRecsT={} -- key=record-name,val=true
+
 -- Creates/overwrites /etc/bind/zones/[zname].db
-local function bindzonedb(zoneT, acmeRecT)
+local function bindzonedb(zoneT, txtRecsT)
    local resp={}
    local zname=zoneT.zname
    local fp=_G.io.open(mkFullZname(zname),"w")
@@ -211,22 +211,32 @@ local function bindzonedb(zoneT, acmeRecT)
    for devT in db.getDevices4ZoneT(zoneT.zid) do
       actionT[devT.dns](devT)
    end
-   if acmeRecT then
-      for k,v in pairs(acmeRecT) do
+
+   -- All Reverse Connection DNS names point to online server's IP.
+   local t = RevConRecsT[zname]
+   if t then
+      local ip=settingsT.ipns1
+      for rec in pairs(t) do emitRec(rec,"IN","A",ip) end
+   end
+
+   -- Temporary TXT records used with LET's Encrypt
+   if txtRecsT then
+      for k,v in pairs(txtRecsT) do
          emitRec(k..".", "IN", "TXT", v) -- Should be absolute: Add a .
       end
    end
    fp:close()
 end
 
+-- Manage temporary Let's Encrypt TXT records.
 -- Returns (and creates) the recsT, which may initially be nil.
--- RecsT[zid] contains a table with record-name (key) and data (value)
-local zonesRecsT={}
+-- RecsT[zid] is: { key:anyUniqueVal and val: {recname=recval } }
+local zonesTxtRecsT={}
 local function getRecsTfromZoneT(zoneT, key)
-   local recsT = zonesRecsT[zoneT.zid]
+   local recsT = zonesTxtRecsT[zoneT.zid]
    if not recsT then
       recsT={}
-      zonesRecsT[zoneT.zid]=recsT
+      zonesTxtRecsT[zoneT.zid]=recsT
    end
    if key then
       local t = recsT[key]
@@ -236,7 +246,7 @@ local function getRecsTfromZoneT(zoneT, key)
    return recsT
 end
 
--- Update the 'bind' database file containing all zones and tell
+-- Update the 'bind' database file for zone
 -- 'bind' to reload DB.
 local function bindUpdateZone(zoneT)
    local recsT=getRecsTfromZoneT(zoneT)
@@ -249,6 +259,23 @@ local function bindUpdateZone(zoneT)
    bindzonedb(zoneT, extraRecsT)
    execsbin("rndc","reload "..zoneT.zname)
 end
+
+local rcBridge=require"RevConnBridge"
+rcBridge.init{
+   setRec=function(zname,recname)
+      local zoneT = db.znameGetZoneT(zname)
+      if zoneT then
+         local t = RevConRecsT[zname]
+         if not t then t={} RevConRecsT[zname]=t end
+         t[recname]=true 
+      end
+      bindUpdateZone(zoneT)
+   end,
+   removeRec=function(zname,recname)
+      local t = RevConRecsT[zname]
+      if t then t[recname] = nil end
+   end
+}
 
 
 -- Called from CertUpdater.lua when performing DNS challenge and a DNS
@@ -292,17 +319,31 @@ end
 
 
 -- User's from mako.conf : System admin users
-function app.checkAdminCredentials(uname, pwd)
+function app.checkRootCredentials(uname, pwd)
    local p=conf.users[uname]
    if type(p) == 'table' then return p[1] == ha1(uname or "",pwd or "") end
    return p == pwd -- cleartext
 end
 
--- Login for the zone admin, one admin per zone.
--- Note: System admins can also log in to any zone
-function app.checkCredentials(zoneT, uname, pwd)
-   return zoneT and zoneT.admPwd == ha1(uname or "",pwd or "") or
-      app.checkAdminCredentials(uname, pwd) -- Check system if not zone adm.
+-- Login as user
+-- OR
+-- Login as the zone admin, one admin per zone.
+-- OR
+-- Login as root, the super user
+function app.login(zoneT, uname, pwd)
+   uname,pwd=trimS(uname or ""),trimS(pwd or "")
+   local ha1=ha1(uname,pwd)
+   local userT = db.getUserT(zoneT.zid,uname)
+   if userT then
+      if ha1 == userT.pwd then
+         userT.type,userT.pwd="user",nil
+         return userT
+      end
+   elseif zoneT.admEmail == uname and zoneT.admPwd == ha1 then
+      return {type="admin"}
+   elseif app.checkRootCredentials(uname, pwd) then
+      return {type="admin"}
+   end
 end
 
 
@@ -317,6 +358,7 @@ local function deleteZone(zname)
    updateNamedConf()
    execsbin("rndc","reconfig")
    certUpdater.removeZone(zname)
+   RevConRecsT[zname]=nil
 end
 
 local function deleteDevice(zoneT, dkey)
@@ -408,6 +450,10 @@ end
 local function cmdIsRegistered(cmd,hT,zkey,zoneT)
    local dkey,devT = lookupDev(cmd,hT)
    if not dkey then return end
+   local peer = peername(cmd)
+   if devT.wanAddr ~= peer then
+      db.updateAddress4Device(devT.dkey,devT.localAddr,peer,devT.dns)
+   end
    rsp(cmd, {["X-Name"]=fmt("%s.%s",devT.name,zoneT.zname)})
 end
 
@@ -428,7 +474,7 @@ local function cmdSetIpAddress(cmd,hT,zkey,zoneT)
    local wan=peername(cmd)
    local dtype=getDnsType(hT)
    if devT.localAddr~=ip or devT.wanAddr~=wan or devT.dns~=dtype then
-      db.updateAddress4Device(dkey,ip,wan,dns,function() bindUpdateZone(zoneT) end)
+      db.updateAddress4Device(dkey,ip,wan,dtype,function() bindUpdateZone(zoneT) end)
    else
       db.updateTime4Device(dkey)
    end
@@ -446,6 +492,10 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
    local recsT,recT = getRecsTfromZoneT(zoneT, dkey)
    recT[rname]=rdata
    bindUpdateZone(zoneT)
+   local peer = peername(cmd)
+   if devT.wanAddr ~= peer then
+      db.updateAddress4Device(devT.dkey,devT.localAddr,peer,devT.dns)
+   end
    rsp(cmd)
 end
 
@@ -465,6 +515,14 @@ local function cmdGetWan(cmd,hT,zkey,zoneT)
    rsp(cmd,hT)
 end
 
+local function cmdRevCon(cmd,hT,zkey,zoneT)
+   local dkey = lookupDev(cmd,hT)
+   if not dkey then return end
+   cmd:setstatus(202)
+   cmd:flush()
+   rcBridge.newDevice(zoneT.zname,dkey,ba.socket.req2sock(cmd))
+end
+
 -- All commands (functions)
 local commandT={
    Register=cmdRegister,
@@ -474,6 +532,7 @@ local commandT={
    SetAcmeRecord=cmdSetAcmeRecord,
    RemoveAcmeRecord=cmdRemoveAcmeRecord,
    GetWan=cmdGetWan,
+   RevCon=cmdRevCon
 }
 
 local function b64Dec(b64)
@@ -597,7 +656,19 @@ local function cmsfunc(_ENV,relpath)
    if not request:issecure() then response:sendredirect("https://"..host,true) end
    _ENV.db=db
    if host == serviceName then return adminDir(_ENV,relpath) end
-   _ENV.zoneT=db.znameGetZoneT(host)
+   local zoneT=db.znameGetZoneT(host)
+   _ENV.zoneT=zoneT
+   if not zoneT then
+      -- Is this a Reverse Connection (RC) FQN
+      local dz,zone=host:match"([^%.]+)%.(.+)"
+      if dz and 40 == #dz then
+         local zT=db.znameGetZoneT(zone)
+         if zT then
+            rcBridge.newClient(request,dz,zone)
+            return
+         end
+      end
+   end
    return zonesDir(_ENV,relpath, host)
 end
 local cmsdir=ba.create.dir()

@@ -1,17 +1,16 @@
 local fmt = string.format
 
-local function convert(io)
+local function convert(conn,q)
+   local io=ba.mkio(ba.openio"home","data")
+   trace(io,conn,q)
    if not io then
       return
    end
-   local db = require "ZoneDB"
    local rw = require "rwfile"
    local zones = rw.json(io, "zones.json")
    if zones then
       io:remove"zones.json"
       local su = require "sqlutil"
-      local env, conn = su.open "zones"
-      local conn, q = db.getWConn()
       local now = q(ba.datetime "NOW":tostring())
       for zone, zkey in pairs(zones) do
          local fname="z." .. zkey .. ".json"
@@ -30,8 +29,8 @@ local function convert(io)
                )
             conn:execute(
                fmt(
-                  "%s(%s,%s,%s,%s,%s,%s,%s)",
-                  "INSERT INTO zones (zname,regTime,accessTime,admEmail,admPwd,zkey,zsecret) VALUES",
+                  "%s(%s,%s,%s,%s,%s,%s,%s,0)",
+                  "INSERT INTO zones (zname,regTime,accessTime,admEmail,admPwd,zkey,zsecret,autoReg) VALUES",
                   q(zT.zname),
                   q(ba.datetime(tonumber(zT.rtime)):tostring()),
                   now,

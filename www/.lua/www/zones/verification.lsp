@@ -35,7 +35,7 @@ end
 ba.thread.run(sendEmail) 
 ?>
 
-<h1>Enter your verification code</h1>
+<h2>Enter your verification code</h2>
 
 <div class="card card-body bg-light">
   <form id="verification" method="post">

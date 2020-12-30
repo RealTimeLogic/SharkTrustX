@@ -3,7 +3,9 @@
 -- Remove device if zone admin.
 
 local s = request:session()
-if not s or not s.authenticated then
+local user = s.userT and s.userT.type
+trace(user)
+if user ~="admin" then
    response:json{ok=false}
 end
 

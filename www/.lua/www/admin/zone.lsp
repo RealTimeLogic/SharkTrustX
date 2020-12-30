@@ -7,11 +7,10 @@ if request:method() == "POST" and data.terminate == "yes" then
   app.deleteZone(zname)
   response:sendredirect"manage"
 end
-local db = require"ZoneDB"
 local zoneT=db.znameGetZoneT(zname)
 if not zname then response:sendredirect"/" end
 ?>
-<h1>Zone Information</h1>
+<h2>Zone Information</h2>
 <div class="card card-body bg-light">
   <div class="alert alert-success" role="alert">
    <table>

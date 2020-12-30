@@ -2,7 +2,7 @@
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-danger">
-<h1>E-Mail address not accepted</h1>
+<h2>E-Mail address not accepted</h2>
 <p>Please use your company email address.</p>
 <p><a class="btn btn-primary" role="button" href='/'>Continue</a></p>
 </div>
@@ -53,7 +53,7 @@ end
 ?>
 
 
-<h1>Register</h1>
+<h2>Register</h2>
 <p>Register for Real Time Logic's DNS Service.</p>
 <div class="card card-body bg-light">
 <form id="valform" method="post">

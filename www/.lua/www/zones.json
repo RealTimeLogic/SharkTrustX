@@ -4,34 +4,46 @@
         "." : {
             "path" : "index.lsp",
             "title" : "Available Devices",
-            "nologin" : true
         },
         "login" : {
             "path" : "login.lsp",
             "title" : "DNS Service Login",
-            "nologin" : true
+        },
+
+        "create" : {
+            "path" : "create.lsp",
+            "title" : "Create an Account",
+        },
+
+        "recover" : {
+            "path" : "recover.lsp",
+            "title" : "Recover Account",
         },
 
         "manage" : {
             "path" : "manage.lsp",
-            "title" : "Manage Devices"
+            "title" : "Manage Devices",
+            "user" : "admin"
+        },
+        "users" : {
+            "path" : "users.lsp",
+            "title" : "Manage Users",
+            "user" : "admin"
         },
         "settings" : {
             "path" : "settings.lsp",
-            "title" : "Settings"
+            "title" : "Settings",
+            "user" : "admin"
         },
         "verification" : {
             "path" : "verification.lsp",
-            "title" : "Enter Verification Code"
+            "title" : "Enter Verification Code",
+            "user" : "admin"
         },
         "cgen" : {
             "path" : "cgen.lsp",
-            "title" : "Generate C Code"
-        },
-        "recover" : {
-            "path" : "recover.lsp",
-            "title" : "Recover Account",
-            "nologin" : true
+            "title" : "Generate C Code",
+            "user" : "admin"
         }
     },
 
@@ -39,7 +51,8 @@
     [
         {"link":".", "name":"Devices", "visible": true},
         {"link":"login", "name": "Login", "visible": true},
-        {"link": "manage","name": "Manage"},
-        {"link": "settings","name": "Settings"}
+        {"link": "manage","name": "Manage","user" : "admin"},
+        {"link": "users","name": "Users","user" : "admin"},
+        {"link": "settings","name": "Settings","user" : "admin"}
     ]
 }

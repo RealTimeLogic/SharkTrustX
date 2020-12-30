@@ -3,7 +3,7 @@
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-danger">
-<h1>Invalid Validation Key</h1>
+<h2>Invalid Validation Key</h2>
 <p>Invalid key or key has expired.</p>
 <p><a class="btn btn-primary" role="button" href="/">Request new validation</a></p>
 </div>
@@ -16,7 +16,7 @@ local function emitAlreadyReg() ?>
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-danger">
-<h1>Domain In Use</h1>
+<h2>Domain In Use</h2>
 <p>Domain already registered!</p>
 <p><a class="btn btn-primary" role="button" href="/">Register new domain</a></p>
 </div>
@@ -30,7 +30,7 @@ local function emitInvalidDNS(rsp) ?>
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-danger">
-<h1>Invalid Domain Name Servers</h1>
+<h2>Invalid Domain Name Servers</h2>
 <p>The domain name servers for your domain must be set to:</p>
 <table>
 <tr><td>Name Server 1:</td><td><?lsp=ns.ns1?></td></tr>
@@ -46,7 +46,7 @@ local function emitInvalidDNS(rsp) ?>
 end
 local function emitCredentialsForm(vk,email) ?>
 
-<h1>Credentials:</h1>
+<h2>Credentials:</h2>
 
 <div class="card card-body bg-light">
 <form id="pwdform" method="post">
@@ -89,7 +89,7 @@ local function emitRegComplete()
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-primary">
-<h1>Registration Complete</h1>
+<h2>Registration Complete</h2>
 <p>You will receive an email with additional instructions when your account is ready.</p>
 </div>
 </div>
@@ -165,7 +165,7 @@ if request:method()=="POST" then
    end
 end
 ?>
-<h1>Enter Validation Key</h1>
+<h2>Enter Validation Key</h2>
 <div class="card card-body bg-light">
 <form id="valform" method="post">
 <div class="form-group">

@@ -1,6 +1,6 @@
 <?lsp
 ?>
-<h1>Manage Zones</h1>
+<h2>Manage Zones</h2>
 
 <?lsp
 local zonesT={}

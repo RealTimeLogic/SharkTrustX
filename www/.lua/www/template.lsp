@@ -23,12 +23,15 @@
           <ul class="navbar-nav ml-auto">
 <?lsp -- Render the top menu
    local link = page.link
-   local auth=page.authenticated
+   local userT=page.userT
+   local utype = userT and userT.type or "?"
    if page.menuT then
       for _,miT in pairs(page.menuT) do
-         if (auth and miT.link ~= 'login') or (not auth and miT.visible) then
+         if miT.visible or miT.user == utype then
+          if not userT or miT.link ~= 'login' then
             response:write('<li class="nav-item', miT.link==link and ' active"' or '"' ,
                            '><a class="nav-link" href="',miT.link,'">',miT.name,'</a></li>')
+          end
          end
       end
    end

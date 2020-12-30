@@ -2,14 +2,21 @@
  local ispost = request:method() == "POST"
  if ispost then
     local data=request:data()
-    if app.checkCredentials(zoneT, data.ba_username, data.ba_password) then
-       request:session(true).authenticated=true
-       response:sendredirect"/manage"
+    local userT = app.login(zoneT, data.ba_username, data.ba_password)
+    if userT then
+      request:session(true).userT=userT
+      if userT.type == "user" and not userT.poweruser then
+        db.setUserAccess4Wan(zoneT.zid,userT.uid,app.peername(request))
+      end
+      response:sendredirect"/"
     end
     ba.sleep(1000)
  end
 ?>
-<h1>Zone Admin Login</h1>
+<style>
+#account a{float:right;color:gray;margin-left:1em}
+</style>
+<h2>Login</h2>
 <div class="card card-body bg-light">
   <?lsp= ispost and '<div class="alert alert-danger" role="alert">Incorrect credentials!</div>' or '' ?>
   <form method="post" id="login_form">
@@ -23,5 +30,5 @@
     </div>
     <input type="submit" class="btn btn-primary btn-block" value="Enter" tabindex="3">
   </form>
-  <span><a style="float:right;color:gray" href="/recover">Forgot account?</a></span>
+  <span id="account"><a href="/recover">Forgot account?</a><a href="/create">Create an account?</a></span>
 </div>

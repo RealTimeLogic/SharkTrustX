@@ -3,26 +3,26 @@
     {
         "." : {
             "path" : "index.lsp",
-            "title" : "DNS Service",
-            "nologin" : true
+            "title" : "DNS Service"
         },
         "validate" : {
             "path" : "validate.lsp",
-            "title" : "Validate",
-            "nologin" : true
+            "title" : "Validate"
         },
         "login" : {
             "path" : "login.lsp",
-            "title" : "DNS Service Login",
-            "nologin" : true
+            "title" : "DNS Service Login"
         },
         "manage" : {
             "path" : "manage.lsp",
-            "title" : "Manage Zones"
+            "title" : "Manage Zones",
+            "user" : "root"
         },
         "zone" : {
             "path" : "zone.lsp",
-            "title" : "Manage Zone"
+            "title" : "Manage Zone",
+            "user" : "root"
+
         }
     },
 

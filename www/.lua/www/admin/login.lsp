@@ -2,14 +2,14 @@
  local ispost = request:method() == "POST"
  if ispost then
     local data=request:data()
-    if app.checkAdminCredentials(data.ba_username, data.ba_password) then
-       request:session(true).authenticated=true
+    if app.checkRootCredentials(data.ba_username, data.ba_password) then
+       request:session(true).userT = {user="root"}
        response:sendredirect"/manage"
     end
     ba.sleep(1000)
  end 
 ?>
-<h1>Admin Login</h1>
+<h2>Admin Login</h2>
 <div class="card card-body bg-light">
   <?lsp= ispost and '<div class="alert alert-danger" role="alert">Incorrect credentials!</div>' or '' ?>
   <form method="post" id="login_form">
