@@ -35,7 +35,7 @@ local env, dbExec =
 
    local dbthread = ba.thread.create()
    local function dbExec(sql, noCommit, func)
-      trace(sql)
+      tracep(9,sql)
       dbthread:run(
          function()
             if sql then checkExec(sql, wconn:execute(sql)) end

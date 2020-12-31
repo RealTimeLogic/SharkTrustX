@@ -46,6 +46,7 @@ const rembut=
 
 
 $(function() {
+    if(typeof addRemoveButton == 'undefined') addRemoveButton=false;
     let lastErrowE=null;
     let lastIndex=-1;
     $(".devtab > tr").each(function(index) {
@@ -66,7 +67,6 @@ $(function() {
             $.getJSON("rpc/details.lsp", {name:name}, function(rsp) {
                 arrowE.removeClass("darrow").addClass("uarrow");
                 lastErrowE=arrowE;
-                console.log(rsp.canrem);
                 if(rsp.dz)
                 {
                     trE.after(formatString(
@@ -79,7 +79,7 @@ $(function() {
                         rsp.active ? "Yes" : "No",
                         (new Date(rsp.lastActiveTime*1000)).toLocaleString(),
                         rsp.activeCons,
-                        rsp.canrem ? rembut : ""
+                        rsp.canrem && addRemoveButton ? rembut : ""
                         ));
                 }
                 else

@@ -11,6 +11,9 @@ local fmt=string.format
 -- Note: a dkey is unique across all zones
 local devicesT={}
 
+-- The devices' sub domain (dz) is rotated this often for security reasons
+local secretsExpTimeSpan = {hours = 12}
+
 -- Provided by the .preload script and set via the init() function
 local setRecord -- function(zname, recordName)
 local removeRecord -- function(zname, recordName)
@@ -20,7 +23,7 @@ local function connectionBridge(source,deviceT,sink)
    local isServer = not sink and true or false
    local peer = source:peername()
    if not sink then -- Idle device
-      deviceT.idleSocksT[source]=function(sock) if not sock then source:close() else sink=sock end end
+      deviceT.idleSocksT[source]=function(sock) sink=sock end
    end
    local data,err = source:read()
    if not data then
@@ -45,6 +48,10 @@ local function connectionBridge(source,deviceT,sink)
    sink:close()
 end
 
+local function createSecret()
+   local sb=string.byte
+   return ba.rndbs(10):gsub(".",function(x) return fmt("%02x",sb(x)) end)
+end
 
 -- Set up a new idle (pending) device reverse connection
 local function newDevice(zname,dkey,sock)
@@ -52,19 +59,18 @@ local function newDevice(zname,dkey,sock)
    dkey=dkey:lower()
    local deviceT = devicesT[dkey]
    if not deviceT then
-      local sb=string.byte
-      local secret=ba.rndbs(10):gsub(".",function(x) return fmt("%02x",sb(x)) end)
       deviceT = {
          idleSocksT={},
          zname=zname,
-         dz=secret..dkey,
+         dz=createSecret()..dkey,
          activeCons=0,
-         lastActiveTime=ba.datetime"NOW"
+         lastActiveTime=ba.datetime"NOW",
+         secretExpTime=ba.datetime"NOW" + secretsExpTimeSpan
       }
       devicesT[dkey] = deviceT
       setRecord(zname, deviceT.dz)
    end
-   trace("Device",fmt("https://%s.%s",deviceT.dz,zname))
+   tracep(9,"Device",fmt("https://%s.%s",deviceT.dz,zname), sock)
    sock:event(connectionBridge,"s",deviceT)
 end
 
@@ -73,8 +79,8 @@ local function removeDevice(dkey)
    local deviceT = devicesT[dkey]
    if deviceT then
       devicesT[dkey]=nil
-      for func in pairs(deviceT.idleSocksT) do
-         func() -- No sock, thus close
+      for sock in pairs(deviceT.idleSocksT) do
+         sock:close()
       end
       removeRecord(deviceT.zname, deviceT.dz)
    end
@@ -132,7 +138,7 @@ local function newClient(cmd,dz,zone)
          ba.sleep(20)
       end
       -- Giving up. No available reverse connection.
-      --trace"Giving up"
+      tracep(9,"Giving up")
       cmd:sendredirect("https://"..zone)
       return false
    end
@@ -146,12 +152,13 @@ end
 
 -- For security reasons, create a new Device-Zone name when idle for more than 12 hours
 local function terminateIdleDevs()
-   local maxtime = ba.datetime"NOW" - {hours = 12}
+   local now = ba.datetime"NOW"
    for dkey,deviceT in pairs(devicesT) do
-      if deviceT.activeCons == 0 and deviceT.lastActiveTime < maxtime then
-         devicesT[dkey] = nil
-         removeDevice(dkey)
-         for sock in pairs(deviceT.idleSocksT) do sock:close() end
+      if deviceT.activeCons == 0 and deviceT.secretExpTime < now then
+         removeRecord(deviceT.zname, deviceT.dz, true)
+         deviceT.dz=createSecret()..dkey
+         deviceT.secretExpTime = now + secretsExpTimeSpan
+         setRecord(deviceT.zname, deviceT.dz)
       end
    end
    return true -- Keep running interval timer

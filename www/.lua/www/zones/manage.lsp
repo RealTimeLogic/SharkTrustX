@@ -1,3 +1,4 @@
+<script> const addRemoveButton=true; </script>
 <?lsp
 local wanL = db.getWanL(zoneT.zid)
 if #wanL > 0 then

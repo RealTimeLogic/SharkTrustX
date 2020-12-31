@@ -1,3 +1,6 @@
+
+mako.tldir:configure{priority=9} -- PATCH for test
+
 local log -- function: see below
 local hio=ba.openio"home"
 local rw=require"rwfile"
@@ -262,14 +265,14 @@ end
 
 local rcBridge=require"RevConnBridge"
 rcBridge.init{
-   setRec=function(zname,recname)
+   setRec=function(zname,recname, noUpdate)
       local zoneT = db.znameGetZoneT(zname)
       if zoneT then
          local t = RevConRecsT[zname]
          if not t then t={} RevConRecsT[zname]=t end
          t[recname]=true 
       end
-      bindUpdateZone(zoneT)
+      if not noUpdate then bindUpdateZone(zoneT) end
    end,
    removeRec=function(zname,recname)
       local t = RevConRecsT[zname]
