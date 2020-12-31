@@ -1,7 +1,7 @@
-# BACME
-Barracuda Automated Certificate Management and DNS Server
+# SharkTrustEx
+### (SharkTrust Extended)
 
-Note: this version requires Mako Server version 3.5 or newer. Use the branch "Version-1" for older servers.
+Note: this version is in development and requires Mako Server version 3.6 or newer. Use the branch "Version-1" for older servers.
 
 This repository contains the source code for [Real Time Logic's Let's encrypt DNS Service](https://acme.realtimelogic.com/) and a ready to use installation script, making it easy for anyone to set up their own online service replica. The service is designed to run on one online VPS and uses [bind](https://en.wikipedia.org/wiki/BIND) for the DNS management. The bind service is controlled by a Lua powered application running on a Mako Server instance.
 
