@@ -52,7 +52,7 @@ local function manageUser(email)
 ----------------------------------------------
    local userT = db.getUserT(zoneT.zid,email)
    if not userT then response:sendredirect"" end
-   local devsAccessT=db.getDevices4User(userT.uid)
+   local devsAccessT=db.getDevices4User(userT.uid, true)
    response:write('<h4>Remote Connection Access for: ',email,'</h4>')
    local wanL = db.getWanL(zoneT.zid)
    for _,wanAddr in ipairs(wanL) do

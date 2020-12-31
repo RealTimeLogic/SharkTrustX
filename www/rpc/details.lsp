@@ -20,6 +20,7 @@ if zoneT and dname then
          }
          if dz then
             rsp.dz=dz
+            rsp.fqn=dz.."."..zoneT.zname
             rsp.active=active
             rsp.lastActiveTime=lastActiveTime:ticks()
             rsp.activeCons=activeCons

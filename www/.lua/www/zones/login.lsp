@@ -30,5 +30,5 @@
     </div>
     <input type="submit" class="btn btn-primary btn-block" value="Enter" tabindex="3">
   </form>
-  <span id="account"><a href="/recover">Forgot account?</a><a href="/create">Create an account?</a></span>
+  <span id="account"><a href="/recover">Forgot account?</a><a href="/create">Create an account</a></span>
 </div>

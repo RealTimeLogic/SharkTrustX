@@ -133,26 +133,32 @@ local function getDevices4Wan(zid, wanAddr)
 end
 
 -- Get all devices a regular user has access to
--- Returns a table where key=did,val=true
-local function getDevices4User(uid)
+-- Returns:
+--   if tab=true: a table where key=did,val=true
+--   if not tab: an iterator, which returns a table with all of the zone's keys/vals
+local function getDevices4User(uid,tab)
    local sql =
       fmt(
-      "%s%s%s",
-      "devices.did FROM devices INNER JOIN UsersDevAccess ON devices.did == UsersDevAccess.did WHERE UsersDevAccess.uid=",
+      "%s%s%s%s",
+      tab and "devices.did" or "*",
+      " FROM devices INNER JOIN UsersDevAccess ON devices.did == UsersDevAccess.did WHERE UsersDevAccess.uid=",
       uid,
       " ORDER BY wanAddr,name ASC"
    )
-   local t={}
-   local conn = openConn()
-   local next = su.iter(conn, sql)
-   local did,err = next()
-   while did do
-      t[did] = true
-      did,err = next()
+   if tab then
+      local t={}
+      local conn = openConn()
+      local next = su.iter(conn, sql)
+      local did,err = next()
+      while did do
+         t[did] = true
+         did,err = next()
+      end
+      if err then trace("Err:", err, sql) end
+      closeConn(conn)
+      return t
    end
-   if err then trace("Err:", err, sql) end
-   closeConn(conn)
-   return t
+   return sqlIter(sql, true)
 end
 
 
