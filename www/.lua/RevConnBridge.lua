@@ -71,6 +71,7 @@ local function newDevice(zname,dkey,sock)
       setRecord(zname, deviceT.dz)
    end
    tracep(9,"Device",fmt("https://%s.%s",deviceT.dz,zname), sock)
+   sock:setoption("keepalive",true,240,240)
    sock:event(connectionBridge,"s",deviceT)
 end
 
@@ -139,9 +140,14 @@ local function newClient(cmd,dz,zone)
       end
       -- Giving up. No available reverse connection.
       tracep(9,"Giving up")
-      cmd:sendredirect("https://"..zone)
+      cmd:setheader("Retry-After", "3")
+      cmd:setstatus(503)
+      cmd:write('<html><head><meta http-equiv="refresh" content="3"></head>',
+                '<body><h2>Reverse Connections Exhausted</h2></body></html>')
       return false
    end
+   -- domain not found
+   -- Enable logic for preventing a user from guessing the sub-domain
    cmd=cmd:deferred()
    cmd:setstatus(302)
    cmd:setheader("Location","https://"..zone)
