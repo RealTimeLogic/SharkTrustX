@@ -141,9 +141,9 @@ local function newClient(cmd,dz,zone)
       -- Giving up. No available reverse connection.
       tracep(9,"Giving up")
       cmd:setheader("Retry-After", "3")
-      cmd:setstatus(503)
-      cmd:write('<html><head><meta http-equiv="refresh" content="3"></head>',
-                '<body><h2>Reverse Connections Exhausted</h2></body></html>')
+      cmd:setheader("Location",cmd:encoderedirecturl(cmd:url(),true,true))
+      cmd:setcontentlength(0)
+      cmd:setstatus(302)
       return false
    end
    -- domain not found
