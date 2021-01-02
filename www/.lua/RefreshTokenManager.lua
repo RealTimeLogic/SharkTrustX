@@ -17,7 +17,7 @@ local function createTimer(rToken)
 end
 
 local function cmdGetToken(cmd)
-   if not getZoneName(cmd:header"X-Key") then
+   if not getZoneName(cmd:header"X-Key" or "") then
       cmd:senderror(404)
       cmd:abort()
    end

@@ -21,6 +21,9 @@ local removeRecord -- function(zname, recordName)
 -- Two cosocket instances per connection, one for server and one for client
 local function connectionBridge(source,deviceT,sink)
    local isServer = not sink and true or false
+   if isServer then
+      deviceT.lastActiveTime=ba.datetime"NOW"
+   end
    local peer = source:peername()
    if not sink then -- Idle device
       deviceT.idleSocksT[source]=function(sock) sink=sock end
@@ -33,7 +36,6 @@ local function connectionBridge(source,deviceT,sink)
       return
    end
    if isServer then
-      deviceT.lastActiveTime=ba.datetime"NOW"
       deviceT.activeCons = deviceT.activeCons + 1
    end
    while data do

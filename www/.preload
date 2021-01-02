@@ -444,7 +444,7 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    -- Make sure sub-domain name is unique by checking name conflict in nameT
    local ix,orgn=0,name
    while db.nameGetDeviceT(zoneT.zid,name) do ix=ix+1 name=fmt("%s%d",orgn,ix) end
-   local dkey=db.addDevice(zoneT.zkey,name,ip,peername(cmd),getDnsType(hT),info or "", function() bindUpdateZone(zoneT) end)
+   local dkey=db.addDevice(zoneT.zkey,name,ip,peername(cmd),getDnsType(hT),hT["X-Info"] or "", function() bindUpdateZone(zoneT) end)
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
 
