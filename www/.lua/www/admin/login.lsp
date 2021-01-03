@@ -3,7 +3,7 @@
  if ispost then
     local data=request:data()
     if app.checkRootCredentials(data.ba_username, data.ba_password) then
-       request:session(true).userT = {user="root"}
+       request:session(true).userT = {type="root"}
        response:sendredirect"/manage"
     end
     ba.sleep(1000)

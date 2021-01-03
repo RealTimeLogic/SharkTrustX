@@ -5,6 +5,16 @@ local elevenHours = (11*60*60) * 1000 -- In milliseconds
 local getZoneName = require"ZoneDB".getZoneName
 local db = require"ZoneDB"
 
+local function peername(cmd)
+   local ip,port,is6=cmd:peername()
+   if not ip then return "?" end
+   if is6 and ip:find("::ffff:",1,true) == 1 then
+      ip=ip:sub(8,-1)
+   end
+   return ip
+end
+
+
 local function sendToken(cmd,rToken,expDatetime)
    cmd:setheader("X-RefreshToken",ba.b64urlencode(rToken))
    cmd:setheader("X-Expires",expDatetime:tostring())
@@ -22,7 +32,16 @@ local function cmdGetToken(cmd)
       cmd:abort()
    end
    local dkey=cmd:header"X-Dev"
-   if dkey then db.updateTime4Device(dkey) end
+   if dkey then
+      local devT = db.keyGetDeviceT(dkey)
+      if devT then
+         local peer=peername(cmd)
+         if devT.wanAddr ~= peer then
+            db.updateAddress4Device(devT.dkey,devT.localAddr,peer,devT.dns)
+         end
+         db.updateTime4Device(dkey)
+      end
+   end
    -- Set 'now' 15 minutes ahead
    local now = ba.datetime"NOW" + {mins=15}
    for rToken,exp in pairs(rTokensT) do

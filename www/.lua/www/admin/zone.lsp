@@ -3,12 +3,12 @@
 local data=request:data()
 
 local zname=data.name
+local zoneT=zname and db.znameGetZoneT(zname)
+if not zoneT then response:sendredirect"/" end
 if request:method() == "POST" and data.terminate == "yes" then
   app.deleteZone(zname)
   response:sendredirect"manage"
 end
-local zoneT=db.znameGetZoneT(zname)
-if not zname then response:sendredirect"/" end
 ?>
 <h2>Zone Information</h2>
 <div class="card card-body bg-light">

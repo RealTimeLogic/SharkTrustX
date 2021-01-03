@@ -22,13 +22,18 @@
             "path" : "zone.lsp",
             "title" : "Manage Zone",
             "user" : "root"
-
+        },
+        "email" : {
+            "path" : "email.lsp",
+            "title" : "E-Mail",
+            "user" : "root"
         }
     },
 
     "menu": 
     [
         {"link":".", "name":"Register", "visible": true},
-        {"link": "manage","name": "Manage"}
+        {"link": "manage","name": "Manage Zones","user" : "root"},
+        {"link": "email","name": "E-Mail","user" : "root"}
     ]
 }

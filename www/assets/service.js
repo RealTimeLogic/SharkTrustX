@@ -75,7 +75,7 @@ $(function() {
                         (new Date(rsp.accessTime*1000)).toLocaleString(),
                         rsp.info ? rsp.info : "Not provided",
                         rsp.dkey ? rsp.dkey : "Hidden",
-                        '<a target="blank" href="https://'+rsp.fqn+'">'+rsp.dz+'</a>',
+                        rsp.active ? '<a target="blank" href="https://'+rsp.fqn+'">'+rsp.dz+'</a>' : rsp.fqn,
                         rsp.active ? "Yes" : "No",
                         (new Date(rsp.lastActiveTime*1000)).toLocaleString(),
                         rsp.activeCons,
