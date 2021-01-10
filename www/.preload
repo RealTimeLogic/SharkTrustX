@@ -67,10 +67,10 @@ end)()
 
 
 local function log(iserr,fmts,...)
-   local msg=fmt("BACME: "..fmts,...)
+   local msg=fmt("SharkTrustEx: "..fmts,...)
    tracep(false,iserr and 0 or 2,msg)
    if mako.daemon then
-      local op = iserr and {flush=true,subject="BACME Error"} or {ts=true}
+      local op = iserr and {flush=true,subject="SharkTrustEx Error"} or {ts=true}
       mako.log(msg,op)
    end
    return nil, msg
@@ -550,7 +550,7 @@ local function command(cmd)
       b64Dec(hT["X-RefreshToken"]),
       b64Dec(hT["X-Token"]),
       b64Dec(hT["X-Hash"])
-   if not zkey or not rtoken or not token or not hash then -- Not a BACME client
+   if not zkey or not rtoken or not token or not hash then -- Not a SharkTrustEx client
       return cmd:senderror(404)
    end
    -- Client must use a secure connection
