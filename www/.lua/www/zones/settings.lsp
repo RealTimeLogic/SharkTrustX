@@ -20,7 +20,7 @@ end
    <tr><td>Secret:</td><td>
 <?lsp
  local session = request:session() 
- if session.verification and session.verification == data.verification then
+ if session.verification and session.verification == request:data"verification" then
     print(zoneT.zsecret)
     session.verification=nil
  else

@@ -1,11 +1,12 @@
 
-mako.tldir:configure{priority=9} -- PATCH for test
+--mako.tldir:configure{priority=9} -- PATCH for test
 
 local log -- function: see below
 local hio=ba.openio"home"
 local rw=require"rwfile"
 local fmt=string.format
 local sbyte=string.byte
+local supper=string.upper 
 local baexec=ba.exec
 
 -- For test purposes only
@@ -493,10 +494,10 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
    local rname=hT['X-RecordName']
    local rdata=hT['X-RecordData']
    if not rname or not rdata then return errorRsp(cmd,400,"Invalid command") end
-   db.updateTime4Device(dkey)
    local recsT,recT = getRecsTfromZoneT(zoneT, dkey)
    recT[rname]=rdata
    bindUpdateZone(zoneT)
+   db.updateTime4Device(dkey)
    local peer = peername(cmd)
    if devT.wanAddr ~= peer then
       db.updateAddress4Device(devT.dkey,devT.localAddr,peer,devT.dns)
@@ -562,7 +563,7 @@ local function command(cmd)
    end
    local zoneT = db.zkeyGetZoneT(zkey)
    if not zoneT then return errorRsp(cmd,404, "Invalid X-Key") end
-   local dk = PBKDF2Cache(zkey, zoneT.zsecret)
+   local dk = PBKDF2Cache(zkey, supper(zoneT.zsecret))
    if token ~= ba.crypto.hash"sha256"(hash)(dk)(serverIP)(rtoken)(true,"binary") then
       return errorRsp(cmd,403, "Invalid token")
    end
