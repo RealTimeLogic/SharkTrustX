@@ -102,13 +102,12 @@ local function updateWildcardCert(name, onlyWcCert, setDnsRecCB, remDnsRecCB, on
       }
       local accountT=account()
       local function onCert(key,cert) -- (5)
-         if cert then
-            assert(key == acmeOP.privkey)
+         if cert and key == acmeOP.privkey then
             account(accountT) -- May have been updated
             log(false,"%s certificate %s",rCert(name,true) and "Updating" or "Creating", fmtCert(name,true))
             wCert(name,cert,true)
          else
-            log(true, "Wildcard certificate request error '%s': %s",name, cert)
+            log(true, "Certificate request error '%s': %s : %s",name, key, cert)
          end
          onDoneCB() -- (6)
       end
@@ -183,7 +182,12 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
             if #certsL > 0 then
                local shark=ba.create.sharkssl(nil,{server=true})
                for _,cert in ipairs(certsL) do
-                  shark:addcert(ba.create.sharkcert(cert, acmeOP.privkey))
+                  local scert,err = ba.create.sharkcert(cert, acmeOP.privkey)
+                  if scert then
+                     shark:addcert(scert)
+                  else
+                     log(true, "Creating shark-cert failed: %s\n%s", err or "unknown err", cert)
+                  end
                end
                local cfg = {shark=shark}
                if ba.slcon then ba.slcon = ba.create.servcon(ba.slcon,cfg) end

@@ -135,6 +135,7 @@ local function execsbin(cmd,args)
    cmd=fmt("/usr/sbin/%s %s",cmd,args)
    local resp,ecode=baexec(cmd)
    if ecode ~= 0 then
+      log(true, "Command %s failed: %s %s", cmd, tostring(ecode), resp)
    end
    return {cmd=cmd,resp=resp,ecode=ecode}
 end
@@ -312,11 +313,11 @@ local function createZone(zname, uname, pwd)
    local zoneT
    zoneT=db.addZone(zname, uname, ha1(uname, pwd), function()
       updateNamedConf()
+      execsbin("rndc","reconfig")
+      certUpdater.addZone(zname)
+      log(false, "New zone %s : %s", zname, uname)
       bindzonedb(zoneT)
    end)
-   execsbin("rndc","reconfig")
-   certUpdater.addZone(zname)
-   log(false, "New zone %s : %s", zname, uname)
    return zoneT.zkey
 end
 
@@ -356,12 +357,13 @@ local function deleteZone(zname)
    if not zkey then
       return log(true, "Terminating zone warn: cannot find %s",zname)
    end
-   db.removeZone(zkey)
-   os.remove(mkFullZname(zname)) -- Delete bind's zone config file
-   updateNamedConf()
-   execsbin("rndc","reconfig")
-   certUpdater.removeZone(zname)
-   RevConRecsT[zname]=nil
+   db.removeZone(zkey,function()
+      os.remove(mkFullZname(zname)) -- Delete bind's zone config file
+      updateNamedConf()
+      execsbin("rndc","reconfig")
+      certUpdater.removeZone(zname)
+      RevConRecsT[zname]=nil
+   end)
 end
 
 local function deleteDevice(zoneT, dkey)

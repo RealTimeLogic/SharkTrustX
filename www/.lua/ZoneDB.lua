@@ -235,7 +235,7 @@ local function addZone(zname, admEmail, admPwd, func)
    local now = quote(ba.datetime "NOW":tostring())
    dbExec(
       fmt(
-         "%s(%s,%s,%s,%s,%s,%s,%s)",
+         "%s(%s,%s,%s,%s,%s,%s,%s,0)",
          "INSERT INTO zones (zname,regTime,accessTime,admEmail,admPwd,zkey,zsecret,autoReg) VALUES",
          quote(zname),
          now,
@@ -243,8 +243,7 @@ local function addZone(zname, admEmail, admPwd, func)
          quote(admEmail),
          quote(admPwd),
          quote(zkey),
-         quote(createHexKey(32)),
-         0
+         quote(createHexKey(32))
       ),
       false,
       func
@@ -265,19 +264,23 @@ local function setAutoReg(zid, enable)
    dbExec(fmt("UPDATE zones SET autoReg=%d WHERE zid=%s", enable and 1 or 0, zid))
 end
 
-local function removeZone(zkey)
+local function removeZone(zkey,func)
    local zid = getZid4Zone(zkey)
    if not zid then
       trace("Not found:", zname)
       return
    end
-   for devT in db.getDevices4ZoneT(zid) do
+   local devsL={}
+   for devT in getDevices4ZoneT(zid) do
+      tinsert(devsL, devT)
+   end
+   for _,devT in ipairs(devsL) do
       dbExec(fmt("%s%s", "DELETE FROM UsersDevAccess WHERE did=", devT.did), true)
       rcBridge.removeDevice(devT.dkey)
    end
    dbExec(fmt("%s%s", "DELETE FROM devices WHERE zid=", zid), true)
    dbExec(fmt("%s%s", "DELETE FROM users WHERE zid=", zid), true)
-   dbExec(fmt("%s%s", "DELETE FROM zones WHERE zid=", zid))
+   dbExec(fmt("%s%s", "DELETE FROM zones WHERE zid=", zid),false,func)
 end
 
 local function removeUsers(uidL)
