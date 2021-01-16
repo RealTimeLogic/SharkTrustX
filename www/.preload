@@ -315,9 +315,9 @@ local function createZone(zname, uname, pwd)
    zoneT=db.addZone(zname, uname, ha1(uname, pwd), function()
       updateNamedConf()
       execsbin("rndc","reconfig")
-      certUpdater.addZone(zname)
-      log(false, "New zone %s : %s", zname, uname)
       bindzonedb(zoneT)
+      ba.timer(function() certUpdater.addZone(zname) end):set(20000,true)
+      log(false, "New zone %s : %s", zname, uname)
    end)
    return zoneT.zkey
 end
