@@ -52,6 +52,7 @@ local quote = env.quotestr
 -- Open/close connections used exclusively for reading.
 local function openConn()
    local x, conn = su.open(env, "zones")
+   if conn then conn:setbusytimeout(10000) end
    return conn
 end
 local function closeConn(conn)

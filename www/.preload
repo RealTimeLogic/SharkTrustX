@@ -493,9 +493,13 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
    if not dkey then return end
    local rname=hT['X-RecordName']
    local rdata=hT['X-RecordData']
+   local dnsResolveTmo=hT["X-DnsResolveTmo"]
+   dnsResolveTmo = dnsResolveTmo and tonumber(dnsResolveTmo) or 120000
    if not rname or not rdata then return errorRsp(cmd,400,"Invalid command") end
    local recsT,recT = getRecsTfromZoneT(zoneT, dkey)
    recT[rname]=rdata
+   -- In case device dos not call cmdRemoveAcmeRecord
+   ba.timer(function() recsT[dkey] = nil end):set(dnsResolveTmo+10000,true)
    bindUpdateZone(zoneT)
    db.updateTime4Device(dkey)
    local peer = peername(cmd)
@@ -667,7 +671,8 @@ local function cmsfunc(_ENV,relpath)
    if not zoneT then
       -- Is this a Reverse Connection (RC) FQN
       local dz,zone=host:match"([^%.]+)%.(.+)"
-      if dz and 40 == #dz then
+      -- Length comes from RevConnBridge.lua a-> createSecret()
+      if dz and 32 == #dz then
          local zT=db.znameGetZoneT(zone)
          if zT then
             rcBridge.newClient(request,dz,zone)

@@ -67,7 +67,10 @@ local function openDB()
    else
       ok,err,err2 = createDB(conn,env.quotestr)
    end
-   if ok then return env,conn end
+   if ok then
+      conn:setbusytimeout(10000)
+      return env,conn
+   end
    conn:close()
    env:close()
    error(string.format("Cannot open zones db: %s",err,err2))

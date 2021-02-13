@@ -11,6 +11,9 @@ local fmt=string.format
 -- Note: a dkey is unique across all zones
 local devicesT={}
 
+-- Same as above, but the key is the device zone name 'dz'
+local dzT={}
+
 -- The devices' sub domain (dz) is rotated this often for security reasons
 local secretsExpTimeSpan = {hours = 12}
 
@@ -52,7 +55,7 @@ end
 
 local function createSecret()
    local sb=string.byte
-   return ba.rndbs(10):gsub(".",function(x) return fmt("%02x",sb(x)) end)
+   return ba.rndbs(16):gsub(".",function(x) return fmt("%02x",sb(x)) end)
 end
 
 -- Set up a new idle (pending) device reverse connection
@@ -64,12 +67,13 @@ local function newDevice(zname,dkey,sock)
       deviceT = {
          idleSocksT={},
          zname=zname,
-         dz=createSecret()..dkey,
+         dz=createSecret(),
          activeCons=0,
          lastActiveTime=ba.datetime"NOW",
          secretExpTime=ba.datetime"NOW" + secretsExpTimeSpan
       }
       devicesT[dkey] = deviceT
+      dzT[deviceT.dz] = deviceT
       setRecord(zname, deviceT.dz)
    end
    tracep(9,"Device",fmt("https://%s.%s",deviceT.dz,zname), sock)
@@ -82,6 +86,7 @@ local function removeDevice(dkey)
    local deviceT = devicesT[dkey]
    if deviceT then
       devicesT[dkey]=nil
+      dzT[deviceT.dz]=nil
       for sock in pairs(deviceT.idleSocksT) do
          sock:close()
       end
@@ -128,10 +133,8 @@ local function newClient(cmd,dz,zone)
       cmd:senderror(503)
       return
    end
-   dz=dz:lower()
-   local dkey=dz:sub(21)
-   local deviceT = devicesT[dkey]
-   if deviceT and deviceT.dz == dz then
+   local deviceT = dzT[dz:lower()]
+   if deviceT then
       for i=1,50 do
          local sock = next(deviceT.idleSocksT)
          if sock then
@@ -141,6 +144,10 @@ local function newClient(cmd,dz,zone)
          ba.sleep(20)
       end
       -- Giving up. No available reverse connection.
+      if (deviceT.lastActiveTime + {secs=40}) < ba.datetime"NOW" then
+         cmd:senderror(503)
+         return false
+      end
       tracep(9,"Giving up")
       cmd:setheader("Retry-After", "3")
       cmd:setheader("Location",cmd:encoderedirecturl(cmd:url(),true,true))
@@ -164,7 +171,9 @@ local function terminateIdleDevs()
    for dkey,deviceT in pairs(devicesT) do
       if deviceT.activeCons == 0 and deviceT.secretExpTime < now then
          removeRecord(deviceT.zname, deviceT.dz, true)
-         deviceT.dz=createSecret()..dkey
+         dzT[deviceT.dz]=nil
+         deviceT.dz=createSecret()
+         dzT[deviceT.dz]=deviceT
          deviceT.secretExpTime = now + secretsExpTimeSpan
          setRecord(deviceT.zname, deviceT.dz)
       end
@@ -177,7 +186,6 @@ ba.timer(terminateIdleDevs):set(60*60*1000,true)
 local function getDevInfo(dkey)
    local deviceT = devicesT[dkey:lower()]
    if deviceT then
-      ba.json.encode(deviceT)
       return deviceT.dz,(next(deviceT.idleSocksT) and true or false),deviceT.lastActiveTime,deviceT.activeCons
    end
 end
