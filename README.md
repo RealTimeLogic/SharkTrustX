@@ -1,5 +1,5 @@
-# SharkTrustEx
-### (SharkTrust Extended)
+# SharkTrustX
+### (SharkTrust eXtended)
 
 Note: this version is in development and requires Mako Server version 3.6 or newer. Use the branch "Version-1" for older servers.
 
