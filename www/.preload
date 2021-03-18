@@ -330,26 +330,57 @@ function app.checkRootCredentials(uname, pwd)
    return p == pwd -- cleartext
 end
 
--- Login as user
--- OR
--- Login as the zone admin, one admin per zone.
--- OR
--- Login as root, the super user
-function app.login(zoneT, uname, pwd)
-   uname,pwd=trimS(uname or ""),trimS(pwd or "")
-   local ha1=ha1(uname,pwd)
-   local userT = db.getUserT(zoneT.zid,uname)
-   if userT then
-      if ha1 == userT.pwd then
-         userT.type,userT.pwd="user",nil
-         return userT
-      end
-   elseif zoneT.admEmail == uname and zoneT.admPwd == ha1 then
-      return {type="admin"}
-   elseif app.checkRootCredentials(uname, pwd) then
-      return {type="admin"}
+
+do -- scope
+
+   -- Access Right (ACL) management functions
+
+   local function userCanAccess(userType)
+      return userType == "user" or not userType
    end
-end
+   
+   local powerUserTypeT={power=true,user=true}
+   local function powerUserCanAccess(userType)
+      return powerUserTypeT[userType] or not userType
+   end
+
+   local adminUserTypeT={admin=true,power=true,user=true}
+   local function adminUserCanAccess(userType)
+      return adminUserTypeT[userType] or not userType
+   end
+
+   -- Login as user (can be power user)
+   -- OR
+   -- Login as the zone admin, one admin per zone.
+   -- OR
+   -- Login as root, the super user
+   function app.login(zoneT, uname, pwd)
+      uname,pwd=trimS(uname or ""),trimS(pwd or "")
+      local ha1=ha1(uname,pwd)
+      local userT = db.getUserT(zoneT.zid,uname)
+      if userT then -- Login as user
+         if ha1 == userT.pwd then
+            if userT.poweruser then
+               userT.canAccess=powerUserCanAccess
+               userT.type = "power"
+            else
+               userT.canAccess=userCanAccess
+               userT.type = "user"
+            end
+            userT.pwd=nil
+            return userT
+         end
+      elseif (zoneT.admEmail == uname and zoneT.admPwd == ha1) or
+         app.checkRootCredentials(uname, pwd) then
+         -- Login as the zone admin OR as root
+         return {
+            canAccess=adminUserCanAccess,
+            type = "admin",
+            name=uname
+         }
+      end
+   end
+end -- scope
 
 
 -- Deletes all data related to zone
@@ -663,7 +694,7 @@ local function cmsfunc(_ENV,relpath)
    if request:header"Authorization"  then return false end -- Delegate basic/dig
    local host = request:header"host"
    if not host then response:senderror(404) return end
-   if not request:issecure() then response:sendredirect("https://"..host,true) end
+   if not request:issecure() then response:redirect2tls() end
    _ENV.db=db
    if host == serviceName then return adminDir(_ENV,relpath) end
    local zoneT=db.znameGetZoneT(host)

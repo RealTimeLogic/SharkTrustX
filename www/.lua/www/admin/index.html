@@ -52,10 +52,8 @@ if request:method() == "POST" then
 end
 ?>
 
-
-<h2>Register</h2>
-<p>Register for Real Time Logic's DNS Service.</p>
-<div class="card card-body bg-light">
+<section class="content">
+<div class="card card-body">
 <form id="valform" method="post">
 <div class="form-group">
 <label for="email">Domain Name:</label>
@@ -69,6 +67,7 @@ end
 <input id="changesub" class="btn btn-primary" type="submit" value="Accept and Sign Up" tabindex="3" />
  </form>
 </div>
+</section>
 <script>
 $(function() {
     $("#valform").validate({

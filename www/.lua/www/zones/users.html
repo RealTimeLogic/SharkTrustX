@@ -1,3 +1,5 @@
+<section class="content">
+<div class="card card-primary">
 <?lsp
 local data = request:data()
 if request:header"x-requested-with" then
@@ -16,10 +18,11 @@ end
 local function listAllUsers()
 ----------------------------------------------
 ?>
-<h2>Users</h2>
-<div class="card card-body bg-light h-100">
+
+<div class="card-header"><h3 class="card-title">Users</h3></div>
+<div class="card-body h-100">
   <table class="table table-striped table-bordered">
-    <thead class="thead-dark"><th>E-Mail</th><th>Power User</th></thead>
+    <thead class="themebg"><th>E-Mail</th><th>Power User</th></thead>
     <tbody class="devtab">
 <?lsp
    local fmt=string.format
@@ -34,7 +37,8 @@ local function listAllUsers()
 ?>
      </tbody>
   </table>
-<p style="position:absolute;right:5px;bottom:5px"><a class="btn btn-primary" href="?remove=">Select users to remove</a></p>
+<div class="card-footer">
+<p style="float:right;right:5px;bottom:5px"><a href="?remove=">Select users to remove</a></p>
 </div>
 <script>
     $("input").change(function() {
@@ -53,14 +57,14 @@ local function manageUser(email)
    local userT = db.getUserT(zoneT.zid,email)
    if not userT then response:sendredirect"" end
    local devsAccessT=db.getDevices4User(userT.uid, true)
-   response:write('<h4>Remote Connection Access for: ',email,'</h4>')
+   response:write('<div class="card-header"><h3 class="card-title">Remote connection access for: ',email,'</h3></div>')
    local wanL = db.getWanL(zoneT.zid)
    for _,wanAddr in ipairs(wanL) do
 ?>
 <div class="card card-body bg-light">
 <h4><?lsp=wanAddr?></h4>
 <table class="table table-striped table-bordered">
-  <thead class="thead-dark"><th>Name</th><th>IP Addr</th><th>Access</th><th>Details</th></thead>
+  <thead class="themebg"><th>Name</th><th>IP Addr</th><th>Access</th><th>Details</th></thead>
   <tbody class="devtab">
 <?lsp
    for devT in db.getDevices4Wan(zoneT.zid,wanAddr) do
@@ -99,11 +103,12 @@ if request:method()=="POST" then
 end
 
 ?>
-<h2>Remove Users</h2>
-<div class="card card-body bg-light h-100">
+
+<div class="card-header"><h3 class="card-title">Remove Users</h3></div>
+<div class="card-body h-100">
  <form method="post">
   <table class="table table-striped table-bordered">
-    <thead class="thead-dark"><th>E-Mail</th><th>Select</th></thead>
+    <thead class="themebg"><th>E-Mail</th><th>Select</th></thead>
     <tbody class="devtab">
 <?lsp
    local fmt=string.format
@@ -118,7 +123,7 @@ end
 ?>
      </tbody>
   </table><br/>
-  <input type="submit" class="btn btn-primary btn-block" value="Remove Selected Users">
+  <input type="submit" class="btn btn-primary" value="Remove Selected Users">
  </form>
 </div>
 <?lsp end
@@ -134,3 +139,5 @@ else
 end
 
 ?>
+</div>
+</section>

@@ -2,7 +2,6 @@ local fmt = string.format
 
 local function convert(conn,q)
    local io=ba.mkio(ba.openio"home","data")
-   trace(io,conn,q)
    if not io then
       return
    end

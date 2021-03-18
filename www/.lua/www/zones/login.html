@@ -1,0 +1,65 @@
+<?lsp
+ local ispost = request:method() == "POST"
+ if ispost then
+    local data=request:data()
+    local userT = app.login(zoneT, data.ba_username, data.ba_password)
+    if userT then
+       request:session(true).userT=userT
+       if userT.type == "user" then
+          db.setUserAccess4Wan(zoneT.zid,userT.uid,app.peername(request))
+       end
+       response:sendredirect"/"
+    end
+    ba.sleep(1000)
+ end
+?>
+
+
+<div style="align-items:center;display:flex;flex-direction:column;">
+<div class="login-box">
+  <!-- /.login-logo -->
+  <div class="card">
+    <div class="card-body login-card-body">
+      <p class="login-box-msg">Login</p>
+      <form method="post">
+        <div class="input-group mb-3">
+          <input class="form-control" type="text" name="ba_username" class="form-control" id="Username" placeholder="Enter your E-Mail address" autofocus required tabindex="1">
+          <div class="input-group-append">
+            <div class="input-group-text">
+              <span class="fas fa-user"></span>
+            </div>
+          </div>
+        </div>
+        <div class="input-group mb-3">
+          <input class="form-control" type="password" name="ba_password" id="Password" placeholder="Enter your password" required tabindex="2">
+          <div class="input-group-append">
+            <div class="input-group-text">
+              <span class="fas fa-lock"></span>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-8">
+          </div>
+          <!-- /.col -->
+          <div class="col-4">
+            <button type="submit" class="btn btn-primary btn-block" tabindex="3">Sign In</button>
+          </div>
+          <!-- /.col -->
+        </div>
+      </form>
+      <div class="social-auth-links text-center mb-3">
+        <p>- OR -</p>
+        <img style="width:100%" src="https://docs.microsoft.com/en-us/azure/active-directory/develop/media/howto-add-branding-in-azure-ad-apps/ms-symbollockup_signin_dark.svg" alt="" />
+      </div>
+      <p class="mb-1">
+        <a href="create.html">Create an account</a>
+      </p>
+      <p class="mb-0">
+        <a href="recover.html">Forgot account?</a>
+      </p>
+    </div>
+    <!-- /.login-card-body -->
+  </div>
+</div>
+</div>

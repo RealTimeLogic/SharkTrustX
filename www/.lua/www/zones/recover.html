@@ -1,4 +1,5 @@
-<h2>Recover Account</h2>
+<section class="content">
+<div class="card card-primary">
 <?lsp
 local fmt=string.format
 local data = request:method() == "POST" and app.xssfilter(app.trim(request:data())) or {}
@@ -15,7 +16,7 @@ end
 local function emitEmailForm(emsg)
 ----------------------------------------------
 ?>
-<div class="card card-body bg-light">
+<div class="card-body">
   <?lsp= emsg and '<div class="alert alert-danger" role="alert">'..emsg..'!</div>' or '' ?>
   <form method="post" id="login_form">
     <div class="form-group">
@@ -42,7 +43,7 @@ local function manageSetPassword()
       else
          db.updateUSerPwd(zoneT.zid, email, ha1Pwd)
       end
-      response:sendredirect"/login"
+      response:sendredirect"/login.html"
    end
    return emitEmailForm"Passwords do not match"
 end
@@ -53,7 +54,7 @@ local function managePasswordForm()
       return emitEmailForm"Incorrect Security Code"
    end
 ?>
-<div class="card card-body bg-light">
+<div class="card-body">
   <form id="pwdform" method="post">
     <?lsp if app.aesdecode(data.xemail) == zoneT.admEmail:lower() then ?>
     <div class="form-group">
@@ -108,7 +109,7 @@ local function manageSecurityCode()
       ba.thread.run(sendEmail)
    end
 ?>
-<div class="card card-body bg-light">
+<div class="card-body">
   <form method="post" id="login_form">
     <div class="form-group">
       <label for="SecCode">Please check your email for a message with your code</label>
@@ -135,5 +136,6 @@ local actions = {
 
 
 ?>
-
+</div>
+</section>
 

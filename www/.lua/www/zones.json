@@ -1,58 +1,57 @@
-{
-    "pages":
+[
     {
-        "." : {
-            "path" : "index.lsp",
-            "title" : "Available Devices",
-        },
-        "login" : {
-            "path" : "login.lsp",
-            "title" : "DNS Service Login",
-        },
-
-        "create" : {
-            "path" : "create.lsp",
-            "title" : "Create an Account",
-        },
-
-        "recover" : {
-            "path" : "recover.lsp",
-            "title" : "Recover Account",
-        },
-
-        "manage" : {
-            "path" : "manage.lsp",
-            "title" : "Manage Devices",
-            "user" : "admin"
-        },
-        "users" : {
-            "path" : "users.lsp",
-            "title" : "Manage Users",
-            "user" : "admin"
-        },
-        "settings" : {
-            "path" : "settings.lsp",
-            "title" : "Settings",
-            "user" : "admin"
-        },
-        "verification" : {
-            "path" : "verification.lsp",
-            "title" : "Enter Verification Code",
-            "user" : "admin"
-        },
-        "cgen" : {
-            "path" : "cgen.lsp",
-            "title" : "Generate C Code",
-            "user" : "admin"
-        }
+        "href" : "index.html",
+        "name" : "Available Devices",
+        "class": "nav-icon fas fa-hdd",
+    },
+    {
+        "href" : "manage.html",
+        "name" : "Manage Devices",
+        "class": "nav-icon fas fa-tasks",
+        "user" : "admin"
+    },
+    {
+        "href" : "users.html",
+        "name" : "Manage Users",
+        "class": "nav-icon fas fa-users-cog",
+        "user" : "admin"
+    },
+    {
+        "href" : "settings.html",
+        "name" : "Settings",
+        "class": "nav-icon fas fa-cogs",
+        "user" : "admin"
     },
 
-    "menu": 
-    [
-        {"link":".", "name":"Devices", "visible": true},
-        {"link":"login", "name": "Login", "visible": true},
-        {"link": "manage","name": "Manage","user" : "admin"},
-        {"link": "users","name": "Users","user" : "admin"},
-        {"link": "settings","name": "Settings","user" : "admin"}
-    ]
-}
+    {
+        "href" : "login.html",
+    },
+    {
+        "href" : "create.html",
+        "name" : "Create an Account",
+    },
+    {
+        "href" : "recover.html",
+        "name" : "Recover Account",
+    },
+    {
+        "href" : "verification.html",
+        "name" : "Enter Verification Code",
+        "user" : "admin"
+    },
+    {
+        "href" : "cgen.html",
+        "name" : "Generate C Code",
+        "user" : "admin"
+    },
+    {
+        "href" : "404.html"
+    },
+    {
+        "href" : "no-zone.html"
+    }
+]
+
+
+
+

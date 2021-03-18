@@ -1,0 +1,48 @@
+<?lsp
+
+local data=request:data()
+
+local zname=data.name
+local zoneT=zname and db.znameGetZoneT(zname)
+if not zoneT then response:sendredirect"/" end
+if request:method() == "POST" and data.terminate == "yes" then
+  app.deleteZone(zname)
+  response:sendredirect"manage.html"
+end
+?>
+
+<section class="content">
+  <div class="card card-primary">
+    <div class="card-header">
+      <h3 class="card-title">Zone Information</h3>
+    </div>
+    <div class="card-body">
+      <table>
+        <tr><td>Domain:</td><td><?lsp=string.format("<a href='https://%s'>https://%s</a>",zname,zname)?></td></tr>
+        <tr><td>Owner:</td><td><?lsp=zoneT.admEmail?></td></tr>
+        <tr><td>Registered:</td><td><?lsp=zoneT.regTime?></td></tr>
+        <tr><td>Devices:</td><td><?lsp=db.countDevices4Zone(zoneT.zid)?></td></tr>
+        <tr><td>Zone Key:</td><td><?lsp=zoneT.zkey?></td></tr>
+      </table>
+    </div>
+    <div class="card-footer">
+      <form method="post">
+
+          <input type="submit" class="btn btn-danger" id="termbut" value="Terminate Account"/>
+          <input type="hidden" id="terminate" name="terminate" value="no"/>
+      </form>
+    </div>
+  </div>
+</section>
+
+
+<script>
+$(function() {
+    $("#termbut").click(function(){
+        var yes = prompt("Enter 'yes' to terminate account","no");
+        $("#terminate").val(yes);
+        return yes == "yes";
+    });
+});
+</script>
+

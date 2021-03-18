@@ -7,7 +7,7 @@ local session = request:session()
 --session.verification,data.verification=1,1 -- For test
 
 if not session.verification or session.verification ~= data.verification then
-   response:sendredirect"verification?ref=cgen"
+   response:sendredirect"verification.html?ref=cgen.html"
 end
 
 local fmt=string.format

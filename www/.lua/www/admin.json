@@ -1,39 +1,35 @@
-{
-    "pages":
+[
     {
-        "." : {
-            "path" : "index.lsp",
-            "title" : "DNS Service"
-        },
-        "validate" : {
-            "path" : "validate.lsp",
-            "title" : "Validate"
-        },
-        "login" : {
-            "path" : "login.lsp",
-            "title" : "DNS Service Login"
-        },
-        "manage" : {
-            "path" : "manage.lsp",
-            "title" : "Manage Zones",
-            "user" : "root"
-        },
-        "zone" : {
-            "path" : "zone.lsp",
-            "title" : "Manage Zone",
-            "user" : "root"
-        },
-        "email" : {
-            "path" : "email.lsp",
-            "title" : "E-Mail",
-            "user" : "root"
-        }
+        "href" : "index.html",
+        "name" : "Register",
+        "class": "nav-icon fas fa-address-card"
     },
-
-    "menu": 
-    [
-        {"link":".", "name":"Register", "visible": true},
-        {"link": "manage","name": "Manage Zones","user" : "root"},
-        {"link": "email","name": "E-Mail","user" : "root"}
-    ]
-}
+    {
+        "href" : "404.html",
+        "name" : "Not Found",
+    },
+    {
+        "href" : "validate.html",
+        "name" : "Validate",
+    },
+    {
+        "href" : "login.html",
+    },
+    {
+        "href" : "manage.html",
+        "name" : "Manage Zones",
+        "class": "nav-icon fas fa-tasks",
+        "user" : "root"
+    },
+    {
+        "href" : "zone.html",
+        "name" : "Manage Zone",
+        "user" : "root"
+    },
+    {
+        "href" : "email.html",
+        "name" : "E-Mail",
+        "class": "nav-icon fas fa-envelope",
+        "user" : "root"
+    }
+]

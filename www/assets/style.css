@@ -1,4 +1,9 @@
 
+.themebg {
+   background: #343A40;
+   color: white;
+}
+
 .devtab .info {
 cursor:pointer;
 width: 20px;

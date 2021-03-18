@@ -19,7 +19,7 @@ You have requested a secure verification code to view secrets.
 Please enter this secure verification code: %s
 
 Reset your password and review your security settings if you did not request viewing secrets:
-https://%s/login
+https://%s/login.html
 ]]
 
 local peername=request:peername()
@@ -35,17 +35,19 @@ end
 ba.thread.run(sendEmail) 
 ?>
 
-<h2>Enter your verification code</h2>
-
-<div class="card card-body bg-light">
+<section class="content">
+<div class="card card-primary">
+<div class="card-body">
   <form id="verification" method="post">
     <div class="form-group">
       <p>A verification code has been sent to your email address. Please enter the code that you received.</p>
       <input type="text" name="verification" class="form-control" placeholder="Verification code" autofocus required tabindex="1"/>
     </div>
-    <input type="submit" class="btn btn-primary btn-block" value="Enter" tabindex="2"/>
+    <input type="submit" class="btn btn-block btn-primary" value="Enter" tabindex="2"/>
   </form>
-</div> 
+</div>
+</div>
+</section>
 <script>
 $("#verification").submit(function() {
 setTimeout("window.location.href='/'", 3000)

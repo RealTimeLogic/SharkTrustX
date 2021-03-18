@@ -1,3 +1,5 @@
+<section class="content">
+<div class="card card-primary">
 <?lsp
 local fmt=string.format
 local ispost = request:method() == "POST"
@@ -9,8 +11,8 @@ local function accountForm(emsg)
 ----------------------------------------------
 local autoReg = tonumber(zoneT.autoReg) > 0
 ?>
-<h2>Create an Account</h2>
-<div class="card card-body bg-light">
+<div class="card-header"><h3 class="card-title">Create an Account</h3></div>
+<div class="card-body">
   <?lsp= emsg and fmt('<div class="alert alert-danger" role="alert">%s!</div>',emsg) or '' ?>
   <form id="pwdform" method="post">
     <div class="form-group">
@@ -61,14 +63,15 @@ if not autoReg then
       lgSend{
          subject="Account accepted for "..zoneT.zname,
          to=email,
-         body=fmt("Your account is now ready. You may login at the following URL: https://%s/login",zoneT.zname)
+         body=fmt("Your account is now ready. You may login at the following URL: https://%s/login.html",zoneT.zname)
       }
    end
    ba.thread.run(sendEmail)
 end
 ?>
-<h2>Account Registered</h2>
-<div class="card card-body bg-light">
+
+<div class="card-header"><h3 class="card-title">Account Registered</h3></div>
+<div class="card-body">
 <div class="alert alert-info" role="alert">
 <p><?lsp=msg?></p>
 </div>
@@ -91,8 +94,8 @@ end
 local extrainfo = data.isuser and "An email with registration data has been sent to your email address. " or ""
 
 ?>
-<h2>Register Account</h2>
-<div class="card card-body bg-light">
+<div class="card-header"><h3 class="card-title">Register Account</h3></div>
+<div class="card-body">
   <?lsp= emsg and '<div class="alert alert-danger" role="alert">'..emsg..'!</div>' or '' ?>
   <form id="pwdform" method="post">
     <div class="form-group">
@@ -110,8 +113,9 @@ local extrainfo = data.isuser and "An email with registration data has been sent
 local function pendingForm()
 ----------------------------------------------
 ?>
-<h2>Account Pending</h2>
-<div class="card card-body bg-light">
+<div class="card-header"><h3 class="card-title">Account Pending</h3></div>
+<div class="card-body">
+
 <div class="alert alert-info" role="alert">
 <p>Your account information has been sent to the zone administrator and will be reviewed for acceptance. You will receive an email when accepted.</p>
 </div>
@@ -162,7 +166,7 @@ else
          subject=fmt("%s : %s requests access to %s",name,email,zoneT.zname),
          to=zoneT.admEmail,
          body=fmt(
-            "%s\nhttps://%s/create?state=register\n\n%s\n",
+            "%s\nhttps://%s/create.html?state=register\n\n%s\n",
             "\nAccept the registration request by copying the following data and pasting it into the online form:",
             zoneT.zname,data)
       }
@@ -184,3 +188,5 @@ local actions = {
 (actions[data.state] or accountForm)()
 
 ?>
+</section>
+</div>
