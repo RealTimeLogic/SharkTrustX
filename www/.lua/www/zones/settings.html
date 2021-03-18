@@ -1,10 +1,34 @@
 <?lsp
 
 if request:header"x-requested-with" then
-   local enabled = request:data"autoReg" == "true"
-   db.setAutoReg(zoneT.zid,enabled)
-   response:json{autoReg=enabled}
+local enabled,err
+   local data = request:data()
+   if data.autoReg then
+      enabled = data.autoReg == "true"
+      db.setAutoReg(zoneT.zid,enabled)
+   elseif data.sso then
+      enabled = data.sso == "true"
+      if enabled and not db.getSsoCfg(zoneT.zid) then
+         enabled=false
+         err="'SSO Settings' must be set"
+      else
+         db.setSsoEnabled(zoneT.zid,enabled)
+      end
+   elseif data.ssocfg then
+      local cfg = ba.json.decode(data.ssocfg)
+      if cfg then
+         enabled = true
+         db.setSsoCfg(zoneT.zid,cfg)
+      end
+   end
+   response:json{enabled=enabled,err=err}
 end
+
+local ssoCfgT=db.getSsoCfg(zoneT.zid) or {
+   tenant="",
+   client_id="",
+   client_secret=""
+}
 
 ?>
 <section class="content">
@@ -12,11 +36,37 @@ end
 <div class="card-body">
    <table class="table table-bordered">
    <tr><td>Owner:</td><td><?lsp=zoneT.admEmail?></td></tr>
-   <tr><td>Registered:</td><td><?lsp=zoneT.regTime?></td></tr>
+   <tr><td>Registered:</td><td><?lsp=app.date(zoneT.regTime)?></td></tr>
    <tr>
      <td><span>Auto Registration:</span></td>
      <td>
-       <input data-toggle="tooltip" title="Enable automatic account registration without requiring administrator acceptance" type="checkbox" id="autoReg" name="autoReg" <?lsp=db.getAutoReg(zoneT.zid) and "checked" or ""?>>
+       <input data-toggle="tooltip" title="Enable automatic account registration without requiring administrator acceptance" type="checkbox" id="autoReg" name="autoReg" <?lsp=zoneT.autoReg and "checked" or ""?>>
+     </td>
+   </tr>
+   <tr>
+     <td><span>SSO:</span></td>
+     <td>
+       <input data-toggle="tooltip" title="Enable or disable Microsoft Single Sign On (SSO)" type="checkbox" id="sso" name="sso" <?lsp=zoneT.sso and "checked" or ""?>>
+     </td>
+   </tr>
+   <tr>
+     <td><span>SSO Settings:</span></td>
+     <td>
+       <table class="table no-border" style="max-width:400px">
+         <tr>
+           <td>Tenant id:</td>
+           <td><input type="text" value="<?lsp=ssoCfgT.tenant?>" class="form-control" id="tenant" placeholder="Enter tenant id"/></td>
+         </tr>
+         <tr>
+           <td>Client id:</td>
+           <td><input type="text" value="<?lsp=ssoCfgT.client_id?>" class="form-control" id="client_id" placeholder="Enter client id"/></td>
+         </tr>
+         <tr>
+           <td>Client secret:</td>
+           <td><input type="text" value="<?lsp=ssoCfgT.client_secret?>" class="form-control" id="client_secret" placeholder="Enter client secret"/></td>
+         </tr>
+       </table>
+       <button id="ssobut" type="button" class="btn btn-primary">Save</button>
      </td>
    </tr>
    <tr><td>Devices:</td><td><?lsp=db.countDevices4Zone(zoneT.zid)?></td></tr>
@@ -38,7 +88,58 @@ end
 </div>
 </section>
 <script>
+$(function() {
+
+    function etoast(msg) {
+        $(document).Toasts('create', {
+            class: 'bg-danger',
+            title: 'Failed:',
+            body: msg
+        });
+    };
+
     $("#autoReg").click(function() {
-        $.getJSON(window.location,{autoReg:$(this).prop("checked")});
+        const autoReg=$(this).prop("checked");
+        $.getJSON(window.location,{autoReg:autoReg}, function() {
+            if(autoReg)
+                toastr.success("Auto Registration Enabled");
+            else
+                toastr.warning("Auto Registration Disabled");
+        });
     });
+    $("#sso").click(function() {
+        let self=$(this);
+        const sso=self.prop("checked");
+        $.getJSON(window.location,{sso:sso},function(rsp){
+            self.prop("checked", rsp.enabled);
+            if(rsp.err)
+                etoast(rsp.err);
+            else {
+                if(sso)
+                    toastr.success("Single Sign On Enabled");
+                else
+                    toastr.warning("Single Sign On Disabled");
+            }
+        });
+    });
+    $("#ssobut").click(function() {
+        let cfg={
+            tenant:$("#tenant").val(),
+            client_id:$("#client_id").val(),
+            client_secret:$("#client_secret").val()
+        }
+        if(cfg.tenant.length > 5 && cfg.client_id.length > 10 && cfg.client_secret.length > 10)
+        {
+            $.getJSON(window.location,{ssocfg:JSON.stringify(cfg)},function(rsp){
+                if(rsp.err)
+                    etoast(rsp.err);
+                 else
+                    toastr.success("Single Sign On Settings Saved");
+            });
+        }
+        else
+            etoast("Please enter valid values");
+    });
+});
+
 </script>

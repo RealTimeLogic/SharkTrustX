@@ -20,7 +20,7 @@ end
       <table>
         <tr><td>Domain:</td><td><?lsp=string.format("<a href='https://%s'>https://%s</a>",zname,zname)?></td></tr>
         <tr><td>Owner:</td><td><?lsp=zoneT.admEmail?></td></tr>
-        <tr><td>Registered:</td><td><?lsp=zoneT.regTime?></td></tr>
+        <tr><td>Registered:</td><td><?lsp=app.date(zoneT.regTime)?></td></tr>
         <tr><td>Devices:</td><td><?lsp=db.countDevices4Zone(zoneT.zid)?></td></tr>
         <tr><td>Zone Key:</td><td><?lsp=zoneT.zkey?></td></tr>
       </table>

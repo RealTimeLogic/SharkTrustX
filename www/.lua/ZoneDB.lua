@@ -49,6 +49,11 @@ end)()
 
 local quote = env.quotestr
 
+local function quotedNowTime()
+   return quote(ba.datetime"NOW":tostring())
+end
+
+
 -- Open/close connections used exclusively for reading.
 local function openConn()
    local x, conn = su.open(env, "zones")
@@ -91,7 +96,12 @@ local function zidGetZoneT(zid)
    return dbFind(true, fmt("%s%s", "* FROM zones WHERE zid=", zid))
 end
 local function znameGetZoneT(zname)
-   return dbFind(true, fmt("%s%s%s", "* FROM zones WHERE zname=", quote(zname), " COLLATE NOCASE"))
+   local t=dbFind(true, fmt("%s%s%s", "* FROM zones WHERE zname=", quote(zname), " COLLATE NOCASE"))
+   if t then
+      t.autoReg = t.autoReg == "1"
+      t.sso = t.sso == "1"
+   end
+   return t
 end
 local function zkeyGetZoneT(zkey)
    return dbFind(true, fmt("%s%s%s", "* FROM zones WHERE zkey=", quote(zkey), " COLLATE NOCASE"))
@@ -178,7 +188,17 @@ end
 
 local function getAutoReg(zid)
    local enabled = dbFind(false, fmt("%s%s", "autoReg FROM zones WHERE zid=",zid))
-   return enabled ~= "0"
+   return enabled == "1"
+end
+
+local function getSsoEnabled(zid)
+   local enabled = dbFind(false, fmt("%s%s", "sso FROM zones WHERE zid=",zid))
+   return enabled == "1"
+end
+
+local function getSsoCfg(zid)
+   local cfg = dbFind(false, fmt("%s%s", "ssocfg FROM zones WHERE zid=",zid))
+   return cfg and ba.json.decode(cfg)
 end
 
 
@@ -194,14 +214,14 @@ local function getWanL(zid)
    return list
 end
 
--- Returns iterator, which returns uid,email,poweruser
+-- Returns iterator, which returns uid,email,regTime,accessTime,poweruser
 local function getUsers()
    local conn = openConn()
-   local sql = "uid,email,poweruser FROM users"
+   local sql = "uid,email,regTime,accessTime,poweruser FROM users"
    local next = su.iter(conn, sql)
    return function()
-      local uid,email,poweruser = next()
-      if uid then return uid,email,poweruser  ~= "0" end
+      local uid,email,regTime,accessTime,poweruser = next()
+      if uid then return uid,email,regTime,accessTime,poweruser  == "1" end
       if email then trace("Err:", email, sql) end
       closeConn(conn)
    end
@@ -233,7 +253,7 @@ local function addZone(zname, admEmail, admPwd, func)
          break
       end
    end
-   local now = quote(ba.datetime "NOW":tostring())
+   local now = quotedNowTime()
    dbExec(
       fmt(
          "%s(%s,%s,%s,%s,%s,%s,%s,0)",
@@ -264,6 +284,15 @@ end
 local function setAutoReg(zid, enable)
    dbExec(fmt("UPDATE zones SET autoReg=%d WHERE zid=%s", enable and 1 or 0, zid))
 end
+
+local function setSsoEnabled(zid, enable)
+   dbExec(fmt("UPDATE zones SET sso=%d WHERE zid=%s", enable and 1 or 0, zid))
+end
+
+local function setSsoCfg(zid, tab)
+   dbExec(fmt("UPDATE zones SET ssocfg=%s WHERE zid=%s", quote(ba.json.encode(tab)), zid))
+end
+
 
 local function removeZone(zkey,func)
    local zid = getZid4Zone(zkey)
@@ -311,7 +340,7 @@ local function addDevice(zkey, name, localAddr, wanAddr, dns, info, func)
          break
       end
    end
-   local now = quote(ba.datetime"NOW":tostring())
+   local now = quotedNowTime()
    dbExec(
       fmt(
          "%s(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -339,7 +368,7 @@ local function updateAddress4Device(dkey, localAddr, wanAddr, dns, func)
          quote(localAddr),
          quote(wanAddr),
          quote(dns),
-         quote(ba.datetime "NOW":tostring()),
+         quotedNowTime(),
          quote(dkey)
       ),
       false,
@@ -348,7 +377,7 @@ local function updateAddress4Device(dkey, localAddr, wanAddr, dns, func)
 end
 
 local function updateTime4Device(dkey)
-   dbExec(fmt("UPDATE devices SET accessTime=%s WHERE dkey=%s", quote(ba.datetime "NOW":tostring()), quote(dkey)))
+   dbExec(fmt("UPDATE devices SET accessTime=%s WHERE dkey=%s", quotedNowTime(), quote(dkey)))
 end
 
 local function removeDevice(dkey, func)
@@ -362,17 +391,26 @@ local function removeDevice(dkey, func)
    end
 end
 
-local function addUser(zid, email, pwd, poweruser)
+local function addUser(zid, email, pwd, poweruser, func)
+   local now=quotedNowTime()
    dbExec(
       fmt(
-         "%s(%s,%s,%d,%s)",
-         "INSERT INTO users (email,pwd,poweruser,zid) VALUES",
+         "%s(%s,%s,%s,%s,%d,%s)",
+         "INSERT INTO users (email,pwd,regTime,accessTime,poweruser,zid) VALUES",
          quote(email),
          quote(pwd),
+         now,
+         now,
          poweruser and 1 or 0,
          zid
-      )
+      ),
+      false,
+      func
    )
+end
+
+local function setUserAccessTime(uid)
+   dbExec(fmt("UPDATE users SET accessTime=%s WHERE uid=%s", quotedNowTime(), uid))
 end
 
 local function setPoweruser(uid, poweruser)
@@ -418,6 +456,8 @@ return {
    addZone = addZone, -- (zname, admEmail, admPwd, func)
    countDevices4Zone = countDevices4Zone, -- (zid)
    getAutoReg=getAutoReg, -- (zid)
+   getSsoEnabled=getSsoEnabled, -- (zid)
+   getSsoCfg=getSsoCfg, -- (zid)
    getDevices4User=getDevices4User, -- (uid)
    getDevices4Wan = getDevices4Wan, -- (zid, wanAddr)
    getDevices4ZoneT = getDevices4ZoneT, -- (zid)
@@ -434,7 +474,10 @@ return {
    removeUsers=removeUsers, -- (uidL)
    removeZone = removeZone, -- (zkey)
    setAutoReg=setAutoReg, -- (zid, enable)
+   setSsoEnabled=setSsoEnabled, -- (zid, enable)
+   setSsoCfg=setSsoCfg, -- (zid, lua-table)
    setDevAccess4User=setDevAccess4User, -- (uid,did,enable)
+   setUserAccessTime=setUserAccessTime , -- (uid)
    setPoweruser=setPoweruser, -- (uid, poweruser)
    setUserAccess4Wan = setUserAccess4Wan, -- (zid, uid, wanAddr)
    updateAddress4Device = updateAddress4Device, -- (dkey, localAddr, wanAddr, dns, func)

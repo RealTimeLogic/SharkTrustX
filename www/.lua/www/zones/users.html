@@ -26,7 +26,7 @@ local function listAllUsers()
     <tbody class="devtab">
 <?lsp
    local fmt=string.format
-   for uid,email,poweruser in db.getUsers() do
+   for uid,email,regTime,accessTime,poweruser in db.getUsers() do
       response:write('<tr><td>',poweruser and email or
                      fmt('%s%s%s%s','<a href="?u=',email,'">',email,'</a>'),
                      '</td><td>',
@@ -47,7 +47,12 @@ local function listAllUsers()
         const poweruser=self.prop("checked");
         const html = poweruser ? email : '<a href="?u='+email+'">'+email+'</a>';
         self.parent().parent().children(":first").html(html);
-        $.getJSON(window.location,{uid:self.attr("uid"),poweruser:poweruser});
+        $.getJSON(window.location,{uid:self.attr("uid"),poweruser:poweruser}, function() {
+            if(poweruser)
+                toastr.success("Power user access granted");
+            else
+                toastr.warning("Power user access removed");
+        });
     });
 </script>
 <?lsp end
@@ -83,8 +88,13 @@ local function manageUser(email)
 <script>
     $("input").change(function(e) {
         const self=$(this);
-        console.log(self.attr("name"));
-        $.getJSON(window.location,{uid:<?lsp=userT.uid?>,did:self.attr("name"),access:self.prop("checked")},function(){});
+        let access=self.prop("checked");
+        $.getJSON(window.location,{uid:<?lsp=userT.uid?>,did:self.attr("name"),access:access},function(){
+            if(access)
+                toastr.success("Access granted");
+            else
+                toastr.warning("Access removed");
+        });
     });
 </script>
 <?lsp end
@@ -108,17 +118,19 @@ end
 <div class="card-body h-100">
  <form method="post">
   <table class="table table-striped table-bordered">
-    <thead class="themebg"><th>E-Mail</th><th>Select</th></thead>
+    <thead class="themebg"><th>E-Mail</th><th>Registered</th><th>Access</th><th>Select</th></thead>
     <tbody class="devtab">
 <?lsp
    local fmt=string.format
-   for uid,email,poweruser in db.getUsers() do
+   for uid,email,regTime,accessTime,poweruser in db.getUsers() do
       response:write('<tr><td>',poweruser and email or
                      fmt('%s%s%s%s','<a href="?u=',email,'">',email,'</a>'),
                      '</td><td>',
-                     poweruser,
-                     '<input name="uid" value="',uid,'" type="checkbox">',
-                     '</td></tr>')
+                     app.date(regTime),
+                     '</td><td>',
+                     app.date(accessTime),
+                     '</td><td>',
+                     '<input name="uid" value="',uid,'" type="checkbox"></td></tr>')
    end
 ?>
      </tbody>

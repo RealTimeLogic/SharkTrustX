@@ -5,11 +5,11 @@ local fmt=string.format
 local ispost = request:method() == "POST"
 local data = ispost and app.xssfilter(app.trim(request:data())) or {state=request:data"state"}
 local lgSend = require"log".sendmail
+local autoReg = zoneT.autoReg
 
 -----------------------------------------
 local function accountForm(emsg)
 ----------------------------------------------
-local autoReg = tonumber(zoneT.autoReg) > 0
 ?>
 <div class="card-header"><h3 class="card-title">Create an Account</h3></div>
 <div class="card-body">
@@ -56,7 +56,7 @@ $(function() {
 local function registrationCompletedForm(email, autoReg)
 ----------------------------------------------
 local msg = autoReg and
-      fmt('You may now <a href="login">login</a> using your email address %s as the username.',email) or
+      fmt('You may now <a href="login.html">login</a> using your email address %s as the username.',email) or
       fmt('User %s is now a registered user.<br>You may make this user a "power user" on the <a href="users">users</a> page.',email)
 if not autoReg then
    local function sendEmail()
@@ -84,9 +84,9 @@ local emsg
 if data.encrypted then
    local infoT = ba.json.decode(app.aesdecode(data.encrypted:match"^%s*%-*(.-)%-*%s*$" or "") or "")
    if infoT and infoT.zid == zoneT.zid and not db.getUserT(zoneT.zid, infoT.email) then
-      local ha1Pwd = app.ha1(infoT.email, infoT.password)
+      local ha1Pwd = infoT.sso and "" or app.ha1(infoT.email, infoT.password)
       db.addUser(zoneT.zid, infoT.email, ha1Pwd, false)
-      return registrationCompletedForm(infoT.email, infoT.autoReg)
+      return registrationCompletedForm(infoT.email, autoReg)
    end
    emsg = "Please enter the correct data or <a href="..request:uri()..">restart account registration</a>"
 end
@@ -126,7 +126,6 @@ local function sendForm()
 ----------------------------------------------
 
 local email,password,name = data.email and data.email:lower(),data.password,data.name
-local autoReg = tonumber(zoneT.autoReg) > 0
 if not email or not password or (not autoReg and not name) then
    return accountForm('All fields are required')
 end
@@ -134,44 +133,17 @@ if db.getUserT(zoneT.zid, email) or email == zoneT.admEmail:lower() then
    return accountForm('E-Mail address already registered')
 end
 
-local data=app.aesencode(ba.json.encode{
+local dataT={
    email=email,
    password=password,
-   autoReg=autoReg,
    zid=zoneT.zid
-})
-local i,line=1,"--------------------------------"
-local t={line}
-for j=32,#data,31 do table.insert(t,data:sub(i,j)) i=j+1 end
-table.insert(t,data:sub(i))
-table.insert(t,line)
-data=table.concat(t,"\n")
-local peer = request:peername()
+}
+
+app.sendRegEmail(request,zoneT,dataT,name)
+
 if autoReg then
-   local function sendEmail()
-      lgSend{
-         subject="Create account for "..zoneT.zname,
-         to=email,
-         body=fmt(
-            "%s%s\n",
-            "\nComplete your registration by copying the following data and pasting it into the online form:\n\n",
-            data)
-      }
-   end
-   ba.thread.run(sendEmail)
    registerForm()
 else
-   local function sendEmail()
-      lgSend{
-         subject=fmt("%s : %s requests access to %s",name,email,zoneT.zname),
-         to=zoneT.admEmail,
-         body=fmt(
-            "%s\nhttps://%s/create.html?state=register\n\n%s\n",
-            "\nAccept the registration request by copying the following data and pasting it into the online form:",
-            zoneT.zname,data)
-      }
-   end
-   ba.thread.run(sendEmail)
    pendingForm()
 end
 

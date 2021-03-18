@@ -34,3 +34,6 @@ background:gray;
    transform: rotate(225deg);
 }
 
+.table.no-border tr td, .table.no-border tr th {
+  border-width: 0;
+}

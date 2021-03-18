@@ -22,7 +22,6 @@
         "class": "nav-icon fas fa-cogs",
         "user" : "admin"
     },
-
     {
         "href" : "login.html",
     },
@@ -49,6 +48,9 @@
     },
     {
         "href" : "no-zone.html"
+    },
+    {
+        "href" : "ms-sso.html"
     }
 ]
 

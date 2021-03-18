@@ -1,0 +1,56 @@
+<?lsp
+if request:method() ~= "POST" then
+   response:sendredirect"/"
+end
+local subj,msg
+local ssoCfgT=db.getSsoCfg(zoneT.zid)
+ssoCfgT.redirect_uri=string.format("https://%s/ms-sso.html",request:domain())
+local header,payload = require"ms-sso".login(request,ssoCfgT)
+
+if header and payload.preferred_username then
+   local email=payload.preferred_username
+   local userT = db.getUserT(zoneT.zid, email)
+   if userT then
+      request:session(true).userT=app.login(zoneT, email, "", userT)
+      response:sendredirect"/"
+   end
+   if db.getAutoReg(zoneT.zid) then
+      local pending=true
+      db.addUser(zoneT.zid, email, "", false, function() pending=false end)
+      local ix=0
+      while ix < 60 and pending do
+         ba.sleep(50)
+         ix=ix+1
+      end
+      if not pending then
+         request:session(true).userT=app.login(zoneT, email, "", db.getUserT(zoneT.zid, email))
+      end
+      response:sendredirect"/"
+   end
+   local dataT={
+      email=email,
+      autoReg=zoneT.autoReg,
+      zid=zoneT.zid,
+      sso=true
+   }
+   app.sendRegEmail(request,zoneT,dataT)
+   subj="Account Pending"
+   msg="Your account information has been sent to the zone administrator and will be reviewed for acceptance. You will receive an email when accepted"
+else
+   subj = "Login Failed"
+   msg = payload or "Unknown error"
+end
+
+?>
+
+<section class="content">
+  <div class="card card-<?lsp=err and 'danger' or 'primary'?>">
+    <div class="card-header"><h3 class="card-title"><?lsp=subj?></h3></div>
+    <div class="card-body">
+      <div class="alert alert-info" role="alert">
+        <p><?lsp=msg?>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+

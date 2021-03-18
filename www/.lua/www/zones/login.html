@@ -48,10 +48,12 @@
           <!-- /.col -->
         </div>
       </form>
+      <?lsp if db.getSsoEnabled(zoneT.zid) then ?>
       <div class="social-auth-links text-center mb-3">
         <p>- OR -</p>
-        <img style="width:100%" src="https://docs.microsoft.com/en-us/azure/active-directory/develop/media/howto-add-branding-in-azure-ad-apps/ms-symbollockup_signin_dark.svg" alt="" />
+        <a href="/ms-sso.lsp"><img style="width:100%" src="/assets/ms-sso.svg" alt="" /></a>
       </div>
+      <?lsp end ?>
       <p class="mb-1">
         <a href="create.html">Create an account</a>
       </p>

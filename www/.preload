@@ -68,10 +68,10 @@ end)()
 
 
 local function log(iserr,fmts,...)
-   local msg=fmt("SharkTrustEx: "..fmts,...)
+   local msg=fmt("SharkTrustX: "..fmts,...)
    tracep(false,iserr and 0 or 2,msg)
    if mako.daemon then
-      local op = iserr and {flush=true,subject="SharkTrustEx Error"} or {ts=true}
+      local op = iserr and {flush=true,subject="SharkTrustX Error"} or {ts=true}
       mako.log(msg,op)
    end
    return nil, msg
@@ -354,12 +354,17 @@ do -- scope
    -- Login as the zone admin, one admin per zone.
    -- OR
    -- Login as root, the super user
-   function app.login(zoneT, uname, pwd)
+   function app.login(zoneT, uname, pwd, userT)
       uname,pwd=trimS(uname or ""),trimS(pwd or "")
       local ha1=ha1(uname,pwd)
-      local userT = db.getUserT(zoneT.zid,uname)
+      local sso
+      if userT then -- only set if SSO login
+         sso=true
+      else
+         userT = db.getUserT(zoneT.zid,uname)
+      end
       if userT then -- Login as user
-         if ha1 == userT.pwd then
+         if ha1 == userT.pwd or sso then
             if userT.poweruser then
                userT.canAccess=powerUserCanAccess
                userT.type = "power"
@@ -367,6 +372,7 @@ do -- scope
                userT.canAccess=userCanAccess
                userT.type = "user"
             end
+            db.setUserAccessTime(userT.uid)
             userT.pwd=nil
             return userT
          end
@@ -588,7 +594,7 @@ local function command(cmd)
       b64Dec(hT["X-RefreshToken"]),
       b64Dec(hT["X-Token"]),
       b64Dec(hT["X-Hash"])
-   if not zkey or not rtoken or not token or not hash then -- Not a SharkTrustEx client
+   if not zkey or not rtoken or not token or not hash then -- Not a SharkTrustX client
       return cmd:senderror(404)
    end
    -- Client must use a secure connection
@@ -619,6 +625,8 @@ end
 -----------------------------------------------------------------------
 ----- END: Code for managing client commands sent to /command.lsp -----
 -----------------------------------------------------------------------
+
+-- Misc. code
 
 local function delayedLoad()
    assert(string.find(baexec"whoami", "root") or iswin==true,
@@ -680,6 +688,50 @@ do
    end
 end
 
+
+function app.sendRegEmail(cmd,zoneT,dataT,name)
+   local data=app.aesencode(ba.json.encode(dataT))
+   local i,line=1,"--------------------------------"
+   local t={line}
+   for j=32,#data,31 do table.insert(t,data:sub(i,j)) i=j+1 end
+   table.insert(t,data:sub(i))
+   table.insert(t,line)
+   data=table.concat(t,"\n")
+   local peer = cmd:peername()
+   local lgSend = require"log".sendmail
+   if dataT.autoReg then
+      local function sendEmail()
+         lgSend{
+            subject="Create account for "..zoneT.zname,
+            to=dataT.email,
+            body=fmt(
+              "%s%s\n",
+              "\nComplete your registration by copying the following data and pasting it into the online form:\n\n",
+            data)
+         }
+      end
+      ba.thread.run(sendEmail)
+   else
+      local function sendEmail()
+         lgSend{
+            subject=fmt("%s : %s requests access to %s",name or "Single Sign On",dataT.email,zoneT.zname),
+            to=zoneT.admEmail,
+            body=fmt(
+              "%s\nhttps://%s/create.html?state=register\n\n%s\n",
+              "\nAccept the registration request by copying the following data and pasting it into the online form:",
+              zoneT.zname,data)
+         }
+      end
+      ba.thread.run(sendEmail)
+   end
+end
+
+function app.date(datetime)
+   local secs = (type(datetime) == "string" and ba.datetime(datetime) or datetime):ticks()
+   return os.date("%Y-%m-%d",secs)
+   
+end
+
 -----------------------------------------------------------------------
 -----              Content Management System (CMS)                -----
 -----------------------------------------------------------------------
@@ -692,7 +744,7 @@ local methods={GET=true,POST=true} -- no other
 local function cmsfunc(_ENV,relpath)
    if not methods[request:method()] then return false end -- Delegate
    if request:header"Authorization"  then return false end -- Delegate basic/dig
-   local host = request:header"host"
+   local host = request:domain()
    if not host then response:senderror(404) return end
    if not request:issecure() then response:redirect2tls() end
    _ENV.db=db
