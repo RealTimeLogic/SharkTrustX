@@ -1,9 +1,8 @@
 # SharkTrustX
-### (SharkTrust eXtended)
 
-Note: this version is in development and requires Mako Server version 3.6 or newer. Use the branch "Version-1" for older servers.
+SharkTrust eXtended (SharkTrustX) is an extended version of [SharkTrust](SharkTrust) that provides additional features such as remote access of private servers. Unlike SharkTrust, which works with any web server, SharkTrustX is designed exclusively for [Barracuda App Server](https://realtimelogic.com/products/barracuda-application-server/) powered products such as the [Mako Server](https://makoserver.net/).
 
-This repository contains the source code for [Real Time Logic's Let's encrypt DNS Service](https://acme.realtimelogic.com/) and a ready to use installation script, making it easy for anyone to set up their own online service replica. The service is designed to run on one online VPS and uses [bind](https://en.wikipedia.org/wiki/BIND) for the DNS management. The bind service is controlled by a Lua powered application running on a Mako Server instance.
+SharkTrustX is a free product released under the MIT License. See the [SharkTrustX product page](https://realtimelogic.com/products/SharkTrustX/) for additional information.
 
 **NOTE:** The following domain names are used in the instructions below. Replace these names with your own such as xx.company.com.
 
@@ -15,7 +14,7 @@ The software requires two name servers listed in the configuration file. However
 
 ## Installation Instructions
 
-**1:** Sign up for a VPS provider and install a Debian distribution, preferably Debian minimal. See the tutorial [Setting up a Low Cost SMQ IoT Broker](https://makoserver.net/articles/Setting-up-a-Low-Cost-SMQ-IoT-Broker) if you are new to VPS or if you want to know more about how the Mako Server is installed on the online VPS by the installation script.
+**1:** Sign up for a VPS provider and install a Debian (derivative) distribution.
 
 **2:** After signing up for a VPS Service, take note of the online server's IP address, navigate to your company's DNS settings page, and add A text records for xx1.company.com, xx2.company.com, and xx.company.com, where xx is a sub domain such as 'acme' and company.com is your company name or any other domain name you own. All A records must point to the VPS IP address.
 
@@ -43,9 +42,17 @@ chmod +x INSTALL.sh
 ./INSTALL.sh
 ```
 
-Carefully follow the instructions provided by the installation script. The script is as a sub component using the installation script provided in the Setting up a Low Cost SMQ IoT Broker tutorial.
+### Configure the Mako Server
 
-When the installation is complete, the installation script opens /home/mako/mako.conf in the nano editor. Do not modify any of the entries in the configuration file. Add the following to the end of mako.conf. **Note:** as explained above, the following must be edited and completed.
+Create a mako.conf script and add instructions for loading SharkTrustX
+
+```lua
+apps = {
+   { prio=10, name='', path='SharkTrustEx/www'},
+}
+```
+
+Add the following to mako.conf:
 
 
 ```lua
