@@ -1,6 +1,6 @@
 # SharkTrustX
 
-SharkTrust eXtended (SharkTrustX) is an extended version of [SharkTrust](SharkTrust) that provides additional features such as remote access of private servers. Unlike SharkTrust, which works with any web server, SharkTrustX is designed exclusively for [Barracuda App Server](https://realtimelogic.com/products/barracuda-application-server/) powered products such as the [Mako Server](https://makoserver.net/).
+SharkTrust eXtended (SharkTrustX) is an extended version of [SharkTrust](https://github.com/RealTimeLogic/SharkTrust) that provides additional features such as remote access of private servers. Unlike SharkTrust, which works with any web server, SharkTrustX is designed exclusively for [Barracuda App Server](https://realtimelogic.com/products/barracuda-application-server/) powered products such as the [Mako Server](https://makoserver.net/).
 
 SharkTrustX is a free product released under the MIT License. See the [SharkTrustX product page](https://realtimelogic.com/products/SharkTrustX/) for additional information.
 
