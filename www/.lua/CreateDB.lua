@@ -30,14 +30,13 @@ CREATE TABLE devices(
    FOREIGN KEY (zid) REFERENCES zones(zid));
 CREATE TABLE users(
    uid INTEGER PRIMARY KEY,
-   email TEXT UNIQUE,
+   email TEXT,
    pwd TEXT,
    regTime TEXT,
    accessTime TEXT,
    poweruser INTEGER,
    zid INTEGER,
    FOREIGN KEY (zid) REFERENCES zones(zid));
-
 CREATE TABLE UsersDevAccess(
    did INTEGER,
    uid INTEGER,
@@ -50,27 +49,37 @@ CREATE UNIQUE INDEX UsersDevAccessIx ON UsersDevAccess (did, uid);
 local su = require "sqlutil"
 local fmt=string.format
 
-local sql11to12=[[
+local s10to11=[[
 ALTER TABLE zones ADD COLUMN sso INTEGER;
 ALTER TABLE zones ADD COLUMN ssocfg TEXT;
 ALTER TABLE users ADD COLUMN regTime TEXT;
 ALTER TABLE users ADD COLUMN accessTime TEXT;
 ]]
 
-
+-- remove UNIQUE constraint on users.email
+local s11to12=[[
+CREATE TABLE newusers(uid INTEGER PRIMARY KEY,email TEXT,pwd TEXT,regTime TEXT,accessTime TEXT,poweruser INTEGER,zid INTEGER,FOREIGN KEY (zid) REFERENCES zones(zid));
+INSERT INTO newusers(uid,email,pwd,regTime,accessTime,poweruser,zid) SELECT uid,email,pwd,regTime,accessTime,poweruser,zid FROM users;
+DROP TABLE users;
+ALTER TABLE newusers RENAME TO users;
+]]
 local function updateDB(conn,quote)
    local ok,err,err2=true 
    local version = su.find(conn,"value FROM config WHERE key='version'")
    if version < "1.1" then
-      ok,err,err2 = conn:mexec(sql11to12)
+      ok,err,err2 = conn:mexec(s10to11)
       if ok then
          local now = quote(ba.datetime"NOW":tostring())
          ok,err,err2 = conn:execute(fmt("UPDATE users SET regTime=%s,accessTime=%s",now,now))
       end
       trace("Upgrading DB 1.0 -> 1.1",ok or err)
    end
+   if version < "1.2" then
+      ok,err,err2 = conn:mexec(s11to12)
+      trace("Upgrading DB 1.1 -> 1.2",ok or err)
+   end
    if ok then
-      conn:execute("UPDATE config SET value=1.1 WHERE key='version'")
+      conn:execute("UPDATE config SET value=1.2 WHERE key='version'")
    end
    return ok,err,err2
 end
@@ -78,8 +87,6 @@ end
 local function createDB(conn,quotestr)
    local ok,err,serr=conn:mexec(db)
    if not ok then trace(err,serr) end
-   -- Convert old JSON based DB to SQL DB, if any
-   io:dofile".lua/Json2DB.lua"(conn,quotestr)
    return ok,err
 end
 

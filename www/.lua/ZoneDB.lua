@@ -215,9 +215,9 @@ local function getWanL(zid)
 end
 
 -- Returns iterator, which returns uid,email,regTime,accessTime,poweruser
-local function getUsers()
+local function getUsers(zid)
    local conn = openConn()
-   local sql = "uid,email,regTime,accessTime,poweruser FROM users"
+   local sql = fmt("%s%s","uid,email,regTime,accessTime,poweruser FROM users WHERE zid=", zid)
    local next = su.iter(conn, sql)
    return function()
       local uid,email,regTime,accessTime,poweruser = next()
@@ -462,7 +462,7 @@ return {
    getDevices4Wan = getDevices4Wan, -- (zid, wanAddr)
    getDevices4ZoneT = getDevices4ZoneT, -- (zid)
    getUserT = getUserT, -- (zid, email)
-   getUsers=getUsers, -- ()
+   getUsers=getUsers, -- (zid)
    getWanL = getWanL, -- (zid)
    getZid4Zone = getZid4Zone, -- (zkey)
    getZoneKey = getZoneKey, -- (zname)
