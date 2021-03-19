@@ -2,7 +2,7 @@
 <div class="card card-primary">
 <?lsp local function tabHeader() ?>
    <table class="table table-striped table-bordered">
-     <thead class="themebg"><th>Name</th><th>IP Addr</th><?lsp=page.userT and '<th>Details</th>' or ''?></thead>
+     <thead class="themebg"><th>Name</th><th>IP Addr</th><?lsp=userT and '<th>Details</th>' or ''?></thead>
      <tbody class="devtab">
 <?lsp end local function localDevProlog() ?>
    <div class="card-header"><h3 class="card-title">Local Devices</h3></div><div class="card-body">
@@ -15,7 +15,7 @@
 local devsTL={}
 local hasProlog=false
 local zname=page.zname
-local arrow = page.userT and '<td class="info"><div class="arrow darrow"></div></td>' or ''
+local arrow = userT and '<td class="info"><div class="arrow darrow"></div></td>' or ''
 for devT in db.getDevices4Wan(zoneT.zid,app.peername(request) or "") do
    devsTL[devT.dkey] = devT
    if not hasProlog then
@@ -23,8 +23,7 @@ for devT in db.getDevices4Wan(zoneT.zid,app.peername(request) or "") do
       localDevProlog()
    end
    response:write('<tr><td><a class="name" target="_blank" href="https://',devT.name,'.',zoneT.zname,'">',devT.name,
-                  '</a></td><td>',devT.localAddr,
-                  '</td><td class="info"><div class="arrow darrow"></div></td></tr>')
+                  '</a></td><td>',devT.localAddr,'</td>',arrow,'</tr>')
 end
 if hasProlog then
    epilogue()
@@ -36,9 +35,8 @@ else
 end
 
 hasProlog=false;
-if page.userT then
+if userT then
    local rc=require"RevConnBridge"
-   local userT=page.userT
    for devT in ((userT.type == "admin" or userT.poweruser) and db.getDevices4ZoneT(zoneT.zid) or db.getDevices4User(userT.uid)) do
       if not devsTL[devT.dkey] then
          local dz,active=rc.getDevInfo(devT.dkey)
