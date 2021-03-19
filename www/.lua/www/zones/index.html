@@ -37,7 +37,7 @@ end
 hasProlog=false;
 if userT then
    local rc=require"RevConnBridge"
-   for devT in ((userT.type == "admin" or userT.poweruser) and db.getDevices4ZoneT(zoneT.zid) or db.getDevices4User(userT.uid)) do
+   for devT in ((userT.type == "root" or userT.type == "admin" or userT.poweruser) and db.getDevices4ZoneT(zoneT.zid) or db.getDevices4User(userT.uid)) do
       if not devsTL[devT.dkey] then
          local dz,active=rc.getDevInfo(devT.dkey)
          if dz then

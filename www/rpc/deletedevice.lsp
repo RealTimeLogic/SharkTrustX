@@ -6,7 +6,7 @@ local dname=request:data"name"
 local zname=request:header"host"
 local db = require"ZoneDB"
 local zoneT=db.znameGetZoneT(zname)
-if zoneT and dname then
+if request:user() and zoneT and dname then
       local devT=db.nameGetDeviceT(zoneT.zid, dname)
       if devT then
          local s = request:session()

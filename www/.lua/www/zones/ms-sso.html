@@ -11,36 +11,53 @@ if header and payload.preferred_username then
    local email=payload.preferred_username
    local userT = db.getUserT(zoneT.zid, email)
    if userT then
-      request:session(true).userT=app.login(zoneT, email, "", userT)
-      response:sendredirect"/"
-   end
-   if db.getAutoReg(zoneT.zid) then
-      local pending=true
-      db.addUser(zoneT.zid, email, "", false, function() pending=false end)
-      local ix=0
-      while ix < 60 and pending do
-         ba.sleep(50)
-         ix=ix+1
+      userT=app.login(request, zoneT, email, "", userT)
+      if userT then
+         request:session(true).userT=userT
+         response:sendredirect"/"
       end
-      if not pending then
-         ba.sleep(50)
-         request:session(true).userT=app.login(zoneT, email, "", db.getUserT(zoneT.zid, email))
+      msg="Not authenticated"
+   else
+      if db.getAutoReg(zoneT.zid) then
+         local pending=true
+         db.addUser(zoneT.zid, email, "", false, function() pending=false end)
+         local ix=0
+         while ix < 60 and pending do
+            ba.sleep(50)
+            ix=ix+1
+         end
+         if pending then
+            msg="DB busy; try again"
+         else
+            userT=db.getUserT(zoneT.zid, email)
+            if userT then
+               userT=app.login(request, zoneT, email, "", userT)
+               if userT then
+                  request:session(true).userT=userT
+                  response:sendredirect"/"
+               end
+               msg="Not authenticated"
+            else
+               msg="User lookup failed; try again"
+            end
+         end
+      else
+         local dataT={
+            email=email,
+            autoReg=zoneT.autoReg,
+            zid=zoneT.zid,
+            sso=true
+         }
+         app.sendRegEmail(request,zoneT,dataT)
+         subj="Account Pending"
+         msg="Your account information has been sent to the zone administrator and will be reviewed for acceptance. You will receive an email when accepted"
       end
-      response:sendredirect"/"
    end
-   local dataT={
-      email=email,
-      autoReg=zoneT.autoReg,
-      zid=zoneT.zid,
-      sso=true
-   }
-   app.sendRegEmail(request,zoneT,dataT)
-   subj="Account Pending"
-   msg="Your account information has been sent to the zone administrator and will be reviewed for acceptance. You will receive an email when accepted"
 else
-   subj = "Login Failed"
    msg = payload or "Unknown error"
 end
+
+if not subj then subj = "Login Failed" end
 
 ?>
 

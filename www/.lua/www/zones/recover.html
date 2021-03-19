@@ -4,7 +4,6 @@
 local fmt=string.format
 local data = request:method() == "POST" and app.xssfilter(app.trim(request:data())) or {}
 local zkey = zoneT.zkey
-local db = require"ZoneDB"
 
 local function encodeSecCode(code)
    local sbyte=string.byte

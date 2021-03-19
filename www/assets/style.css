@@ -1,7 +1,7 @@
 
 .themebg {
    background: #343A40;
-   color: white;
+   color: white !important;
 }
 
 .devtab .info {

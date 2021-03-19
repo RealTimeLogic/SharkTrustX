@@ -53,14 +53,14 @@ end
 
    <ul class="navbar-nav ml-auto">
 <?lsp if userT then ?>
-      <li class="nav-item d-none d-sm-inline-block">
+      <li class="nav-item d-sm-inline-block">
         <span class="nav-link"><?lsp=userT.name or userT.email?></span>
       </li>
-      <li class="nav-item d-none d-sm-inline-block">
+      <li class="nav-item d-sm-inline-block">
         <a href="/logout.lsp" class="nav-link">Logout</a>
       </li>
 <?lsp else ?>
-      <li class="nav-item d-none d-sm-inline-block">
+      <li class="nav-item d-sm-inline-block">
         <a href="/login.html" class="nav-link">Login</a>
       </li>
 <?lsp end ?>

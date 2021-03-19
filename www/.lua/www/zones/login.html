@@ -2,12 +2,9 @@
  local ispost = request:method() == "POST"
  if ispost then
     local data=request:data()
-    local userT = app.login(zoneT, data.ba_username, data.ba_password)
+    local userT = app.login(request, zoneT, data.ba_username, data.ba_password)
     if userT then
        request:session(true).userT=userT
-       if userT.type == "user" then
-          db.setUserAccess4Wan(zoneT.zid,userT.uid,app.peername(request))
-       end
        response:sendredirect"/"
     end
     ba.sleep(1000)

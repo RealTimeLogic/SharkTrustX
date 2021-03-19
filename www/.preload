@@ -354,7 +354,7 @@ do -- scope
    -- Login as the zone admin, one admin per zone.
    -- OR
    -- Login as root, the super user
-   function app.login(zoneT, uname, pwd, userT)
+   function app.login(cmd, zoneT, uname, pwd, userT)
       uname,pwd=trimS(uname or ""),trimS(pwd or "")
       local ha1=ha1(uname,pwd)
       local sso
@@ -371,15 +371,18 @@ do -- scope
             else
                userT.canAccess=userCanAccess
                userT.type = "user"
+               db.setUserAccess4Wan(zoneT.zid,userT.uid,peername(cmd))
             end
             db.setUserAccessTime(userT.uid)
             userT.pwd=nil
+            cmd:login(uname)
             return userT
          end
       end
+      -- Login as the zone admin OR as root
       if (zoneT.admEmail == uname and zoneT.admPwd == ha1) or
          app.checkRootCredentials(uname, pwd) then
-         -- Login as the zone admin OR as root
+         cmd:login(uname)
          return {
             canAccess=adminUserCanAccess,
             type = "admin",

@@ -13,7 +13,7 @@ const formatString = (str, ...params) => {
 
 const details=`
 <tr id="details"><td colspan=3>
-<table class="table table-dark"><tbody>
+<table class="table themebg"><tbody>
   <tr><td>Registered:</td><td>{0}</td></tr>
   <tr><td>Last Access:</td><td>{1}</td></tr>
   <tr><td>Details:</td><td>{2}</td></tr>
@@ -26,12 +26,12 @@ const details=`
 
 const detailsRC=`
 <tr id="details"><td colspan=3>
-<table class="table table-dark"><tbody>
+<table class="table themebg"><tbody>
   <tr><td>Registered:</td><td>{0}</td></tr>
   <tr><td>Last Access:</td><td>{1}</td></tr>
   <tr><td>Details:</td><td>{2}</td></tr>
   <tr><td>Key:</td><td>{3}</td></tr>
-  <tr><td>RC Sub-DN:</td><td>{4}</td></tr>
+  <tr><td>RC Sub-DN:</td><td style="word-break: break-all">{4}</td></tr>
   <tr><td>RC Active:</td><td>{5}</td></tr>
   <tr><td>RC Last Connection:</td><td>{6}</td></tr>
   <tr><td>RC Active Conns:</td><td>{7}</td></tr>
