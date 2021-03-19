@@ -363,7 +363,7 @@ do -- scope
       else
          userT = db.getUserT(zoneT.zid,uname)
       end
-      if userT then -- Login as user
+      if userT then -- Try as std user
          if ha1 == userT.pwd or sso then
             if userT.poweruser then
                userT.canAccess=powerUserCanAccess
@@ -376,7 +376,8 @@ do -- scope
             userT.pwd=nil
             return userT
          end
-      elseif (zoneT.admEmail == uname and zoneT.admPwd == ha1) or
+      end
+      if (zoneT.admEmail == uname and zoneT.admPwd == ha1) or
          app.checkRootCredentials(uname, pwd) then
          -- Login as the zone admin OR as root
          return {

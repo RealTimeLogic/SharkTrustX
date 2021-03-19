@@ -23,7 +23,8 @@ for devT in db.getDevices4Wan(zoneT.zid,app.peername(request) or "") do
       localDevProlog()
    end
    response:write('<tr><td><a class="name" target="_blank" href="https://',devT.name,'.',zoneT.zname,'">',devT.name,
-                  '</a></td><td>',devT.localAddr,'</td>',arrow,'</tr>')
+                  '</a></td><td>',devT.localAddr,
+                  '</td><td class="info"><div class="arrow darrow"></div></td></tr>')
 end
 if hasProlog then
    epilogue()

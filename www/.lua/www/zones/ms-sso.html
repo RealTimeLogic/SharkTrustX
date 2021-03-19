@@ -23,6 +23,7 @@ if header and payload.preferred_username then
          ix=ix+1
       end
       if not pending then
+         ba.sleep(50)
          request:session(true).userT=app.login(zoneT, email, "", db.getUserT(zoneT.zid, email))
       end
       response:sendredirect"/"
