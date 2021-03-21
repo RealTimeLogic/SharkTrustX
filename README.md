@@ -12,6 +12,12 @@ SharkTrustX is a free product released under the MIT License. See the [SharkTrus
 
 The software requires two name servers listed in the configuration file. However, the software is currently limited to running on one VPS and the DNS A record for the three fields above must all point to the same VPS.
 
+## Customizing SharkTrustX
+
+1. Fork or clone this repository.
+2. Customize the template with your own logos and color options. The [template page](www/.lua/www/template.lsp) is based on the  AdminLTE Bootstrap template. See the Mako Server tutorial [How to Build an Interactive Dashboard App](https://makoserver.net/articles/How-to-Build-an-Interactive-Dashboard-App) for details.
+
+
 ## Installation Instructions
 
 **1:** Sign up for a VPS provider and install a Debian (derivative) distribution.
@@ -28,18 +34,14 @@ apt-get update
 apt-get -y upgrade
 ```
 
-### Install GIT
+### Install Required Applications
 ```console
-apt-get -y install git
+apt-get -y install git bind9 whois lsof git nano
 ```
 
-### Clone GIT repo in /tmp and run the installation script
+### Clone GIT repo in a suitable directory
 ```console
-cd /tmp
-git clone https://github.com/RealTimeLogic/BACME.git
-cd BACME
-chmod +x INSTALL.sh
-./INSTALL.sh
+git clone https://github.com/RealTimeLogic/SharkTrustX.git
 ```
 
 ### Configure the Mako Server
@@ -48,7 +50,7 @@ Create a mako.conf script and add instructions for loading SharkTrustX
 
 ```lua
 apps = {
-   { prio=10, name='', path='SharkTrustEx/www'},
+   { name='', path='SharkTrustEx/www'},
 }
 ```
 
@@ -77,7 +79,7 @@ log={
    }
 }
 ```
-Save the changes and start the Mako Server as follows in /home/mako as user 'root'
+Save the changes and start the Mako Server as as user 'root'
 
 ```console
 mako
@@ -87,10 +89,6 @@ You should see the following being printed in the console two minutes after star
 ```console
 ACME: acme.realtimelogic.com renewed
 ```
-The printout should be for your own service's domain name. The above printout signals that the service is operational. You may now terminate the Mako Server process by using CTRL-C and then start the service as a background process:
-
-```console
-/etc/init.d/mako.sh start
-```
+The printout should be for your own service's domain name. The above printout signals that the service is operational. You may now terminate the Mako Server process by using CTRL-C and then [install the Mako Server as a service](https://makoserver.net/articles/Installing-Mako-Server-as-a-Service-on-Linux).
 
 You may now use a browser and navigate to xx.company.com (e.g. acme.realtimelogic.com)
