@@ -46,6 +46,8 @@ git clone https://github.com/RealTimeLogic/SharkTrustX.git
 
 ### Configure the Mako Server
 
+SharkTrustX is a web application powered by the Mako Server.
+
 Create a mako.conf script and add instructions for loading SharkTrustX
 
 ```lua
