@@ -28,6 +28,12 @@ The software requires two name servers listed in the configuration file. However
 
 **4:** Login to the online VPS using SSH, and run the following set of commands in the SSH shell:
 
+## Automatic Installation
+
+Use the [SharkTrustX Ansible Installation Scripts](https://github.com/RealTimeLogic/SharkTrustXInstaller)
+
+# Manual Installation
+
 ### Update Linux
 ```console
 apt-get update
