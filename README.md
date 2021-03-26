@@ -26,13 +26,13 @@ The software requires two name servers listed in the configuration file. However
 
 **3:** Wait 24 hours for the DNS settings to take effect.
 
-**4:** Login to the online VPS using SSH, and run the following set of commands in the SSH shell:
-
 ## Automatic Installation
 
 Use the [SharkTrustX Ansible Installation Scripts](https://github.com/RealTimeLogic/SharkTrustXInstaller)
 
 # Manual Installation
+
+**4:** Login to the online VPS using SSH, and run the following set of commands in the SSH shell:
 
 ### Update Linux
 ```console
