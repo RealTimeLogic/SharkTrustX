@@ -703,7 +703,7 @@ function app.sendRegEmail(cmd,zoneT,dataT,name)
    data=table.concat(t,"\n")
    local peer = cmd:peername()
    local lgSend = require"log".sendmail
-   if dataT.autoReg then
+   if zoneT.autoReg then
       local function sendEmail()
          lgSend{
             subject="Create account for "..zoneT.zname,
