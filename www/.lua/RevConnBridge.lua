@@ -15,7 +15,7 @@ local devicesT={}
 local dzT={}
 
 -- The devices' sub domain (dz) is rotated this often for security reasons
-local secretsExpTimeSpan = {hours = 12}
+local secretsExpTimeSpan = {hours = 36}
 
 -- Provided by the .preload script and set via the init() function
 local setRecord -- function(zname, recordName)
@@ -48,6 +48,9 @@ local function connectionBridge(source,deviceT,sink)
    if isServer then
       deviceT.activeCons = deviceT.activeCons - 1
       deviceT.idleSocksT[source]=nil
+      if deviceT.activeCons == 0 then
+         deviceT.secretExpTime = ba.datetime"NOW" + secretsExpTimeSpan
+      end
    end
    source:close()
    sink:close()
@@ -70,7 +73,7 @@ local function newDevice(zname,dkey,sock)
          dz=createSecret(),
          activeCons=0,
          lastActiveTime=ba.datetime"NOW",
-         secretExpTime=ba.datetime"NOW" + secretsExpTimeSpan
+         secretExpTime = ba.datetime"MAX"
       }
       devicesT[dkey] = deviceT
       dzT[deviceT.dz] = deviceT
@@ -165,16 +168,17 @@ local function newClient(cmd,dz,zone)
    return false
 end
 
--- For security reasons, create a new Device-Zone name when idle for more than 12 hours
+-- For security reasons, create a new Device-Zone name when idle for more than 'secretsExpTimeSpan'.
+-- However, we do not change the zone name if we have not had any client connections.
 local function terminateIdleDevs()
    local now = ba.datetime"NOW"
    for dkey,deviceT in pairs(devicesT) do
-      if deviceT.activeCons == 0 and deviceT.secretExpTime < now then
+      if deviceT.secretExpTime < now then
          removeRecord(deviceT.zname, deviceT.dz, true)
          dzT[deviceT.dz]=nil
          deviceT.dz=createSecret()
          dzT[deviceT.dz]=deviceT
-         deviceT.secretExpTime = now + secretsExpTimeSpan
+         deviceT.secretExpTime = ba.datetime"MAX"
          setRecord(deviceT.zname, deviceT.dz)
       end
    end

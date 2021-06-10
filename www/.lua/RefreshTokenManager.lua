@@ -14,10 +14,12 @@ local function peername(cmd)
    return ip
 end
 
-
 local function sendToken(cmd,rToken,expDatetime)
    cmd:setheader("X-RefreshToken",ba.b64urlencode(rToken))
    cmd:setheader("X-Expires",expDatetime:tostring())
+   local now=ba.datetime"NOW"
+   cmd:setheader("X-Date",now:tostring())
+   cmd:setheader("X-ExpIn",tostring((expDatetime - now) // 1000000000))
    cmd:abort()
 end
 
