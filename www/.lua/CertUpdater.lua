@@ -56,7 +56,7 @@ local function getCertExpDate(domainname, cert)
       return ba.datetime"MIN"
    end
    local exptime = ba.parsecerttime(tzto)
-   if exptime ~= 0 then return exptime end
+   if exptime ~= 0 then return ba.datetime(exptime) end
    log(true, "UTCTime parse error for: %s\n%s",tzto,cert)
    return ba.datetime"MIN"
 end
