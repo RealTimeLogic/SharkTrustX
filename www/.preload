@@ -674,10 +674,8 @@ app.settingsT = settingsT
 -- Converts UTC time to UNIX time
 function app.convertUTCTime(tm)
    if type(tm) == "string" then
-      local y,m,d,h=tm:match"(%d%d)(%d%d)(%d%d)(%d%d)(%d%d)(%d%d)Z"
-      if y then
-         return os.time{year=y+2000,month=m,day=d,hour=h}
-      end
+      local exptime = ba.parsecerttime(tm)
+      if exptime ~= 0 then return exptime end
    end
 end
 
