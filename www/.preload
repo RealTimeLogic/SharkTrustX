@@ -484,7 +484,9 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    local ip=getAndCheckIp(cmd,hT)
    if not ip then return end
    local name=getName(cmd,hT,zoneT)
-   if not name then return end
+   if not name or name:find"[^%a%d-]" or name:find"^-" or name:find"-$" then
+      return errorRsp(cmd,400,"Invalid sub-domain name")
+   end
    -- Make sure sub-domain name is unique by checking name conflict in nameT
    local ix,orgn=0,name
    while db.nameGetDeviceT(zoneT.zid,name) do ix=ix+1 name=fmt("%s%d",orgn,ix) end
