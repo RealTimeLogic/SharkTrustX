@@ -511,7 +511,7 @@ end
 local function cmdIsAvailable(cmd,hT,zkey,zoneT)
    local name=getName(cmd,hT,zoneT)
    if not name then return end
-   rsp(cmd, {["X-Available"] = zoneT.devices[name] and "No" or "Yes"})
+   rsp(cmd, {["X-Available"] = db.nameGetDeviceT(zoneT.zid,name) and "no" or "yes"})
 end
 
 -- Client "SetIpAddress" device command
