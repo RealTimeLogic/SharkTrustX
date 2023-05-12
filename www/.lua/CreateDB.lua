@@ -107,7 +107,7 @@ local function openDB()
    end
    conn:close()
    env:close()
-   error(string.format("Cannot open zones db: %s",err,err2))
+   error(string.format("Cannot open zones db: %s %s",err,err2 or ""))
 end
 
 return openDB
