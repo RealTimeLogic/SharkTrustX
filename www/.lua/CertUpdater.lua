@@ -109,7 +109,9 @@ local function updateWildcardCert(name, onlyWcCert, setDnsRecCB, remDnsRecCB, on
          end
          onDoneCB() -- (6)
       end
-      acme.cert(accountT, "*."..name, onCert, op)
+      if accountT then -- no err
+         acme.cert(accountT, "*."..name, onCert, op)
+      end
    end
    if onlyWcCert then
       doWildcardCert()
