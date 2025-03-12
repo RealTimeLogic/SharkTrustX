@@ -72,8 +72,7 @@ settings={
    ns2="acme2.realtimelogic.com",
    dn="acme.realtimelogic.com",
    acme={
-      production=true,
-      rsa=true
+      production=true
    }
 }
 
