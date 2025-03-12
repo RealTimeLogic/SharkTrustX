@@ -1,7 +1,7 @@
 local db=[[
 PRAGMA foreign_keys = on;
 CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
-INSERT INTO config (key, value) values("version", "1.1");
+INSERT INTO config (key, value) values("version", "1.2");
 INSERT INTO config (key, value) values("rootUser","");
 INSERT INTO config (key, value) values("rootPwd","");
 CREATE TABLE zones(
@@ -66,6 +66,7 @@ ALTER TABLE newusers RENAME TO users;
 local function updateDB(conn,quote)
    local ok,err,err2=true 
    local version = su.find(conn,"value FROM config WHERE key='version'")
+   assert(version)
    if version < "1.1" then
       ok,err,err2 = conn:mexec(s10to11)
       if ok then

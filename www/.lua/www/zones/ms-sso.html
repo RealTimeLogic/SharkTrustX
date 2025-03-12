@@ -1,11 +1,10 @@
 <?lsp
-if request:method() ~= "POST" then
+local subj,msg
+local sso=app.sso(request:domain())
+if not sso or request:method() ~= "POST" then
    response:sendredirect"/"
 end
-local subj,msg
-local ssoCfgT=db.getSsoCfg(zoneT.zid)
-ssoCfgT.redirect_uri=string.format("https://%s/ms-sso.html",request:domain())
-local header,payload = require"ms-sso".login(request,ssoCfgT)
+local header,payload=sso.login(request)
 
 if header and payload.preferred_username then
    local email=payload.preferred_username

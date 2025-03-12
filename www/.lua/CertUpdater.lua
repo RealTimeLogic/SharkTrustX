@@ -1,3 +1,5 @@
+local wait4DNSTime=12000
+
 local fmt=string.format
 local acme = require"acme/engine"
 local hio = ba.openio"home"
@@ -62,9 +64,28 @@ local function getCertExpDate(domainname, cert)
 end
 
 
+local function getAcmeOP(name,setDnsRecCB,remDnsRecCB)
+   local op = {} for k,v in pairs(acmeOP) do op[k]=v end
+   if setDnsRecCB then
+      op.ch = {
+         type ="dns-01",
+         set=function(dnsRecord, dnsData, resumeCB) -- (3)
+            setDnsRecCB(name, dnsRecord, dnsData)
+            ba.timer(function() resumeCB(true) end):set(wait4DNSTime, true)
+         end,
+         remove=function(resumeCB,na,dnsRecord) -- (4)
+            remDnsRecCB(name, dnsRecord)
+            resumeCB(true)
+         end,
+      }
+   end
+   return op
+end
 
-local function updateCert(nameT, name, onDoneCB)
+
+local function updateCert(nameT, name, onDoneCB, setDnsRecCB, remDnsRecCB)
    nameT[name] = ba.datetime"MAX" -- stop trying to update
+   local op = getAcmeOP(name,setDnsRecCB, remDnsRecCB)
    local accountT=account() or {email=admEmail}
    local function onCert(key,cert)
       if key then
@@ -78,7 +99,7 @@ local function updateCert(nameT, name, onDoneCB)
       end
       onDoneCB()
    end
-   acme.cert(accountT, name, onCert, acmeOP)
+   acme.cert(accountT, name, onCert, op)
 end
 
 -- Create/update both certificate and wildcard cert for name (domain).
@@ -86,19 +107,8 @@ end
 local function updateWildcardCert(name, onlyWcCert, setDnsRecCB, remDnsRecCB, onDoneCB)
    local function doWildcardCert() -- (2)
       -- Copy table
-      local op = {} for k,v in pairs(acmeOP) do op[k]=v end
-      op.ch = {
-         type ="dns-01",
-         set=function(dnsRecord, dnsData, resumeCB) -- (3)
-            setDnsRecCB(name, dnsRecord, dnsData)
-            ba.timer(function() resumeCB(true) end):set(120000, true)
-         end,
-         remove=function(resumeCB,na,dnsRecord) -- (4)
-            remDnsRecCB(name, dnsRecord)
-            resumeCB(true)
-         end,
-      }
-      local accountT=account()
+      local op = getAcmeOP(name,setDnsRecCB, remDnsRecCB)
+      local accountT=account() or {email=admEmail}
       local function onCert(key,cert) -- (5)
          if cert and key == acmeOP.privkey then
             account(accountT) -- May have been updated
@@ -109,21 +119,19 @@ local function updateWildcardCert(name, onlyWcCert, setDnsRecCB, remDnsRecCB, on
          end
          onDoneCB() -- (6)
       end
-      if accountT then -- no err
-         acme.cert(accountT, "*."..name, onCert, op)
-      end
+      acme.cert(accountT, "*."..name, onCert, op)
    end
    if onlyWcCert then
       doWildcardCert()
    else
-      updateCert(zonesT, name, doWildcardCert) -- (1)
+      updateCert(zonesT,name,doWildcardCert,setDnsRecCB,remDnsRecCB)
    end
 end
 
 local function loadCert(certsL,nameT,wildcard)
    for name in pairs(nameT) do
       local cert = rCert(name,wildcard)
-      tracep(9,wildcard and "*." or "", name, cert and "OK" or "failed!")
+      tracep(9,fmt("%s%s",wildcard and "*." or "", name), cert and "OK" or "failed!")
       if cert then
          table.insert(certsL, cert)
       else
@@ -133,20 +141,25 @@ local function loadCert(certsL,nameT,wildcard)
 end
 
 local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
+   acmeOP=op
+   admEmail=aEmail
    -- The private key used for all certs
    local privkey = rw.file(aio,"privkey.key")
-   if not privkey then
-      local kop = op.rsa == true and {key="rsa",bits=op.bits} or {curve=op.curve or "SECP384R1"}
-      log(false, "Creating private key")
-      privkey=ba.create.key(kop)
-      rw.file(aio,"privkey.key",privkey)
+   if privkey then
+      if true == op.rsa then op.privkey=privkey end
+   else
+      if true == op.rsa then
+         log(false, "Creating RSA private key")
+         privkey=ba.create.key({key="rsa",bits=op.bits})
+         rw.file(aio,"privkey.key",privkey)
+         op.privkey=privkey
+      else
+         op.privkey=acme.createkey("SharkTrustX.PrivKey",{curve=op.curve or "SECP384R1"})
+      end
    end
    for _,domain in ipairs(domainsL) do
       domainsT[domain] = getCertExpDate(domain)
    end
-   acmeOP=op
-   acmeOP.privkey=privkey
-   admEmail=aEmail
 
    -- Auto certificate update
    local busy=false
@@ -158,7 +171,8 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
          for name,expDate in pairs(domainsT) do
             if expDate < minDate then
                busy=true
-               updateCert(domainsT, name, certUpdaterCo)
+               -- Using http-01, not dns-01; (two last args not provided)
+               updateCert(domainsT,name,certUpdaterCo)
                coroutine.yield()
                busy=false
                updated=true
@@ -182,7 +196,13 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
             if #certsL > 0 then
                local shark=ba.create.sharkssl(nil,{server=true})
                for _,cert in ipairs(certsL) do
-                  local scert,err = ba.create.sharkcert(cert, acmeOP.privkey)
+                  local kn=acme.useTPM(acmeOP.privkey)
+                  local scert,err
+                  if kn then
+                     scert,err = ba.tpm.sharkcert(kn, cert)
+                  else
+                     scert,err = ba.create.sharkcert(cert, acmeOP.privkey)
+                  end
                   if scert then
                      shark:addcert(scert)
                   else

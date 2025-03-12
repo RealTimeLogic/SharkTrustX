@@ -1,5 +1,7 @@
 
---mako.tldir:configure{priority=9} -- PATCH for test
+mako.tldir:configure{priority=20} -- PATCH for test
+
+ba.thread.run(function() -- Entire file wrapped in a function
 
 local log -- function: see below
 local hio=ba.openio"home"
@@ -53,19 +55,17 @@ settingsT.ipns1,settingsT.ipns2=
 
 -- Fetch our own IP address and resolve domain name 'ns1' or 'ns2'
 -- (future proof)
-local serverIP,hostname = (function()
+local serverIP,hostname,isPrivateIP = (function()
+   local d=require"acme/dns"
+   assert(d.isPrivateIP,"Server too old, please upgrade")
    local ip,s
    while not s do
       s=ba.socket.connect("google.com",80)
    end
-   local ip,port,is6=s:sockname()
-   if is6 and ip:find("::ffff:",1,true) == 1 then
-      ip=ip:sub(8,-1)
-   end
+   ip=d.socPeerName(s)
    s:close()
-   return ip, ip == settingsT.ipns1 and settingsT.ns1 or settingsT.ns2
+   return ip, ip == settingsT.ipns1 and settingsT.ns1 or settingsT.ns2,d.isPrivateIP(ip)
 end)()
-
 
 local function log(iserr,fmts,...)
    local msg=fmt("SharkTrustX: "..fmts,...)
@@ -245,7 +245,7 @@ local function getRecsTfromZoneT(zoneT, key)
    end
    if key then
       local t = recsT[key]
-      if not t then t={}  recsT[key]=t end
+      if not t then t={} recsT[key]=t end
       return recsT, t
    end
    return recsT
@@ -659,7 +659,9 @@ local function delayedLoad()
       rsa=a.rsa,
       acceptterms=true,
    }
-   local domainsL={settingsT.dn,hostname}
+   -- The portal (hostname) is not managed by 'bind' and dns-01, thus
+   -- cert fails for hostname on private network.
+   local domainsL=isPrivateIP and {} or {hostname}
    certUpdater.start(domainsL, setDnsRec, remDnsRec,admEmail,acmeOP)
    log(false, "Ready %s", os.date())
 end
@@ -733,7 +735,10 @@ end
 function app.date(datetime)
    local secs = (type(datetime) == "string" and ba.datetime(datetime) or datetime):ticks()
    return os.date("%Y-%m-%d",secs)
-   
+end
+
+function app.serverAddr(cmd)
+   return serverIP==cmd:domain() and isPrivateIP and "http://"..serverIP or "https://"..settingsT.dn
 end
 
 -----------------------------------------------------------------------
@@ -750,7 +755,11 @@ local function cmsfunc(_ENV,relpath)
    if request:header"Authorization"  then return false end -- Delegate basic/dig
    local host = request:domain()
    if not host then response:senderror(404) return end
-   if not request:issecure() then response:redirect2tls() end
+   if not request:issecure() then
+      if not (serverIP==host and isPrivateIP) then
+         response:redirect2tls()
+      end
+   end
    _ENV.db=db
    if host == serviceName then return adminDir(_ENV,relpath) end
    local zoneT=db.znameGetZoneT(host)
@@ -766,9 +775,35 @@ local function cmsfunc(_ENV,relpath)
             return
          end
       end
+      if serverIP==host then
+         if isPrivateIP then
+            return adminDir(_ENV,relpath)
+         end
+         response:sendredirect("https://"..settingsT.dn)
+      end
    end
    return zonesDir(_ENV,relpath, host)
 end
 local cmsdir=ba.create.dir()
 cmsdir:setfunc(cmsfunc)
 dir:insert(cmsdir, true) -- Exec cmsdir:cmsfunc for all non found assets
+
+do -- SSO zone cache
+   local ssoT={}
+   function app.sso(host)
+      local sso=ssoT[host]
+      if not sso then
+         local zoneT=db.znameGetZoneT(host)
+         if not zoneT or not db.getSsoEnabled(zoneT.zid) then
+            return nil
+         end
+         local ssoCfgT=db.getSsoCfg(zoneT.zid)
+         local function ssolog(...) log(true,...) end
+         sso=require"ms-sso".init(ssoCfgT,"/ms-sso.html",ssolog)
+         ssoT[host]=sso
+      end
+      return sso
+   end
+end
+
+end) -- End: Entire file wrapped in a function

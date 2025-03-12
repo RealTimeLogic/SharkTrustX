@@ -27,7 +27,7 @@ Validation key:
 
 Complete the validation by navigating to the following URL and by
 entering the validation key:
-https://%s/validate.html
+%s/validate.html
 ]]
 
 
@@ -44,7 +44,7 @@ if request:method() == "POST" then
       send{
          subject="DNS Service E-Mail Validation",
          to=data.email,
-         body=string.format(emailfmt, valkey, app.settingsT.dn)
+         body=string.format(emailfmt, valkey, app.serverAddr(request))
       }
       emitEmailDispatched(data.email)
       return
