@@ -67,6 +67,12 @@ local serverIP,hostname,isPrivateIP = (function()
    return ip, ip == settingsT.ipns1 and settingsT.ns1 or settingsT.ns2,d.isPrivateIP(ip)
 end)()
 
+if isPrivateIP then
+   settingsT.serverIP1,settingsT.serverIP2=serverIP,serverIP
+else
+   settingsT.serverIP1,settingsT.serverIP2=settingsT.ipns1,settingsT.ipns2
+end
+
 local function log(iserr,fmts,...)
    local msg=fmt("SharkTrustX: "..fmts,...)
    tracep(false,iserr and 0 or 2,msg)
@@ -200,8 +206,8 @@ local function bindzonedb(zoneT, txtRecsT)
                 zname, -- NS record 2
                 zname, settingsT.ipns1, -- NS A record one
                 zname, settingsT.ipns2, -- NS A record two
-                zname, settingsT.ipns1,
-                zname, settingsT.ipns2))
+                zname, settingsT.serverIP1,
+                zname, settingsT.serverIP2))
    local function emitRec(name,class,type,data)
       fp:write(fmt("%s %s %s %s\n",name,class,type,data))
    end
