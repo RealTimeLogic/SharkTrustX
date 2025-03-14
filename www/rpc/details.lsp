@@ -9,14 +9,18 @@ if request:user() and zoneT and dname then
       local s = request:session()
       if s then
          local user = s.userT and s.userT.type
-         local auth = user =="admin"
+         local adm = user=="admin"
+         local power=adm or user=="power"
          local dz,active,lastActiveTime,activeCons = require"RevConnBridge".getDevInfo(devT.dkey)
+
          local rsp={
             info=devT.info,
             regTime=ba.datetime(devT.regTime or "MIN"):ticks(),
             accessTime=ba.datetime(devT.accessTime or "MIN"):ticks(),
-            dkey = auth and devT.dkey,
-            canrem = auth,
+            dkey = adm and devT.dkey,
+            rname = 0~=#devT.rname and devT.rname,
+            setrname=power,
+            canrem = power,
          }
          if dz then
             rsp.dz=dz

@@ -8,7 +8,7 @@
         "href" : "manage.html",
         "name" : "Manage Devices",
         "class": "nav-icon fas fa-tasks",
-        "user" : "admin"
+        "user" : "power"
     },
     {
         "href" : "users.html",

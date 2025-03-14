@@ -1,12 +1,13 @@
 local db=[[
 PRAGMA foreign_keys = on;
 CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
-INSERT INTO config (key, value) values("version", "1.2");
+INSERT INTO config (key, value) values("version", "1.3");
 INSERT INTO config (key, value) values("rootUser","");
 INSERT INTO config (key, value) values("rootPwd","");
 CREATE TABLE zones(
    zid INTEGER PRIMARY KEY,
    zname TEXT,
+   rname TEXT, -- reverse connection sub domain name prefix; prefix for devices.rname
    regTime TEXT,
    accessTime TEXT,
    admPwd TEXT,
@@ -18,7 +19,8 @@ CREATE TABLE zones(
    ssocfg TEXT); -- JSON Single Sign On config
 CREATE TABLE devices(
    did INTEGER PRIMARY KEY,
-   name TEXT,
+   name TEXT, -- sub domain name
+   rname TEXT, -- reverse connection sub domain name
    dkey TEXT,
    localAddr TEXT,
    wanAddr TEXT,
@@ -49,11 +51,9 @@ CREATE UNIQUE INDEX UsersDevAccessIx ON UsersDevAccess (did, uid);
 local su = require "sqlutil"
 local fmt=string.format
 
-local s10to11=[[
-ALTER TABLE zones ADD COLUMN sso INTEGER;
-ALTER TABLE zones ADD COLUMN ssocfg TEXT;
-ALTER TABLE users ADD COLUMN regTime TEXT;
-ALTER TABLE users ADD COLUMN accessTime TEXT;
+local s12to13=[[
+ALTER TABLE zones ADD COLUMN rname TEXT;
+ALTER TABLE devices ADD COLUMN rname TEXT;
 ]]
 
 -- remove UNIQUE constraint on users.email
@@ -66,22 +66,22 @@ ALTER TABLE newusers RENAME TO users;
 local function updateDB(conn,quote)
    local ok,err,err2=true 
    local version = su.find(conn,"value FROM config WHERE key='version'")
-   assert(version)
-   if version < "1.1" then
-      ok,err,err2 = conn:mexec(s10to11)
-      if ok then
-         local now = quote(ba.datetime"NOW":tostring())
-         ok,err,err2 = conn:execute(fmt("UPDATE users SET regTime=%s,accessTime=%s",now,now))
-      end
-      trace("Upgrading DB 1.0 -> 1.1",ok or err)
-   end
+   assert(version and version >= "1.1", "DB too old")
    if version < "1.2" then
       ok,err,err2 = conn:mexec(s11to12)
-      trace("Upgrading DB 1.1 -> 1.2",ok or err)
+      trace("Upgrading DB 1.1 -> 1.2",ok or (err2 or err))
    end
    if ok then
       conn:execute("UPDATE config SET value=1.2 WHERE key='version'")
    end
+   if ok and version < "1.3" then
+      ok,err,err2 = conn:mexec(s12to13)
+      trace("Upgrading DB 1.2 -> 1.3",ok or (err2 or err))
+   end
+   if ok then
+      conn:execute("UPDATE config SET value=1.3 WHERE key='version'")
+   end
+
    return ok,err,err2
 end
 

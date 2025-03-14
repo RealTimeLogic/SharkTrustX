@@ -18,8 +18,9 @@ const details=`
   <tr><td>Last Access:</td><td>{1}</td></tr>
   <tr><td>Details:</td><td>{2}</td></tr>
   <tr><td>Key:</td><td>{3}</td></tr>
+  {4}
 </tbody></table>
-<div class="mx-auto" style="width: 200px;">{4}</div>
+<div class="mx-auto" style="width: 200px;">{5}</div>
 </td></tr>
 `;
 
@@ -31,21 +32,41 @@ const detailsRC=`
   <tr><td>Last Access:</td><td>{1}</td></tr>
   <tr><td>Details:</td><td>{2}</td></tr>
   <tr><td>Key:</td><td>{3}</td></tr>
-  <tr><td>RC Sub-DN:</td><td style="word-break: break-all">{4}</td></tr>
+  <tr><td>Active RC Name:</td><td style="word-break: break-all">{4}</td></tr>
   <tr><td>RC Active:</td><td>{5}</td></tr>
   <tr><td>RC Last Connection:</td><td>{6}</td></tr>
   <tr><td>RC Active Conns:</td><td>{7}</td></tr>
+  {8}
 </tbody></table>
-<div class="mx-auto" style="width: 200px;">{8}</div>
+<div class="mx-auto" style="width: 200px;">{9}</div>
 </td></tr>
 `;
 
+const editrname=`
+  <tr>
+   <td>RC Name:</td>
+   <td><input type="text" style="min-width:250px" placeholder="Set a name or get a random URL" value="{0}"/><button data-action="save" style="margin-left:1em" type="button" class="btn btn-primary">Save</button></td>
+  </tr>
+`;
+const rname=`<tr><td>RC Name:</td><td>{0}</td></tr>`;
 
 const rembut=
-    '<button type="button" class="btn btn-danger">Remove Device</button>';
-
+    '<button type="button" class="btn btn-danger" data-action="remove">Remove Device</button>';
 
 $(function() {
+  function etoast(msg) {
+    $(document).Toasts('create', {
+      class: 'bg-danger',
+      title: 'Failed:',
+      body: msg
+    });
+  };
+  function insertRname(set,name) {
+    if(set)
+      return formatString(editrname,name ? name : "");
+    else
+      return formatString(rname,name ? name : "'Random URL'");
+  };
     if(typeof addRemoveButton == 'undefined') addRemoveButton=false;
     let lastErrowE=null;
     let lastIndex=-1;
@@ -67,6 +88,7 @@ $(function() {
             $.getJSON("rpc/details.lsp", {name:name}, function(rsp) {
                 arrowE.removeClass("darrow").addClass("uarrow");
                 lastErrowE=arrowE;
+                let setrname = rsp.setrname ? window.location.pathname.includes('manage') : false
                 if(rsp.dz)
                 {
                     trE.after(formatString(
@@ -75,10 +97,11 @@ $(function() {
                         (new Date(rsp.accessTime*1000)).toLocaleString(),
                         rsp.info ? rsp.info : "Not provided",
                         rsp.dkey ? rsp.dkey : "Hidden",
-                        rsp.active ? '<a target="blank" href="https://'+rsp.fqn+'">'+rsp.dz+'</a>' : rsp.fqn,
+                        rsp.active ? '<a style="color:red" target="blank" href="https://'+rsp.fqn+'">'+rsp.dz+'</a>' : rsp.fqn,
                         rsp.active ? "Yes" : "No",
                         (new Date(rsp.lastActiveTime*1000)).toLocaleString(),
                         rsp.activeCons,
+                        insertRname(setrname,rsp.rname),
                         rsp.canrem && addRemoveButton ? rembut : ""
                         ));
                 }
@@ -90,10 +113,24 @@ $(function() {
                         (new Date(rsp.accessTime*1000)).toLocaleString(),
                         rsp.info ? rsp.info : "Not provided",
                         rsp.dkey ? rsp.dkey : "Hidden",
-                        rsp.canrem ? rembut : ""));
+                        insertRname(setrname,rsp.rname),
+                        rsp.canrem && addRemoveButton ? rembut : ""));
+                }
+                if(setrname) {
+                  trE.next().find('button[data-action="save"]').click(function() {
+                    $.getJSON("rpc/setrname.lsp", {dname:name,rname:$(this).prev("input").val()},
+                       function(rsp) {
+                         if(rsp.ok) {
+                           arrowE.removeClass("uarrow").addClass("darrow");
+                           $("#details").remove();
+                         }
+                         else
+                           etoast(rsp.err ? rsp.err : "Operation failed");
+                       });
+                  });
                 }
                 if(rsp.canrem) {
-                    trE.next().find("button").click(function() {
+                    trE.next().find('button[data-action="remove"]').click(function() {
                         $.getJSON("rpc/deletedevice.lsp", {name:name},
                           function(rsp) {
                             if(rsp.ok) {
@@ -102,7 +139,7 @@ $(function() {
                                 trE.remove();
                             }
                             else
-                                location.reload();
+                              etoast(rsp.err ? rsp.err : "Operation failed");
                         });
                     });
                 }

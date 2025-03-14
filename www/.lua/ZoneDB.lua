@@ -293,6 +293,17 @@ local function setSsoCfg(zid, tab)
    dbExec(fmt("UPDATE zones SET ssocfg=%s WHERE zid=%s", quote(ba.json.encode(tab)), zid))
 end
 
+local function zoneRname(zid, rname) -- revcon prefix
+   if not rname then
+      return dbFind(false,fmt("%s%s%s","rname FROM zones WHERE zid=",zid," COLLATE NOCASE")) or ""
+   end
+   dbExec(fmt("UPDATE zones SET rname=%s WHERE zid=%s", quote(rname), zid))
+end
+
+local function setDevRname(did, rname) -- revcon prefix
+   dbExec(fmt("UPDATE devices SET rname=%s WHERE did=%s", quote(rname), did))
+end
+
 
 local function removeZone(zkey,func)
    local zid = getZid4Zone(zkey)
@@ -322,7 +333,7 @@ local function removeUsers(uidL)
 end
 
 
-local function addDevice(zkey, name, localAddr, wanAddr, dns, info, func)
+local function addDevice(zkey, name, rname, localAddr, wanAddr, dns, info, func)
    local zid = getZid4Zone(zkey)
    if not zid then
       trace("zkey not found:", zkey)
@@ -343,9 +354,10 @@ local function addDevice(zkey, name, localAddr, wanAddr, dns, info, func)
    local now = quotedNowTime()
    dbExec(
       fmt(
-         "%s(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-         "INSERT INTO devices (name,dkey,localAddr,wanAddr,dns,info,regTime,accessTime,zid) VALUES",
+         "%s(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+         "INSERT INTO devices (name,rname,dkey,localAddr,wanAddr,dns,info,regTime,accessTime,zid) VALUES",
          quote(name),
+         quote(rname),
          quote(dkey),
          quote(localAddr),
          quote(wanAddr),
@@ -451,7 +463,7 @@ local function setDevAccess4User(uid,did,enable)
 end
 
 return {
-   addDevice = addDevice, -- (zkey, name, localAddr, wanAddr, dns, info, func)
+   addDevice = addDevice, -- (zkey, name, rname, localAddr, wanAddr, dns, info, func)
    addUser = addUser, -- (zid, email, pwd, poweruser)
    addZone = addZone, -- (zname, admEmail, admPwd, func)
    countDevices4Zone = countDevices4Zone, -- (zid)
@@ -468,6 +480,8 @@ return {
    getZoneKey = getZoneKey, -- (zname)
    getZoneName = getZoneName, -- (zkey)
    getZonesT = getZonesT, -- ()
+   zoneRname=zoneRname,
+   setDevRname=setDevRname,
    keyGetDeviceT = keyGetDeviceT, -- (dkey)
    nameGetDeviceT = nameGetDeviceT, -- (zid, name)
    removeDevice = removeDevice, -- (dkey, func)

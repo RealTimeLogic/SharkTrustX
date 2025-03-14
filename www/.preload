@@ -275,6 +275,7 @@ local rcBridge=require"RevConnBridge"
 rcBridge.init{
    setRec=function(zname,recname, noUpdate)
       local zoneT = db.znameGetZoneT(zname)
+      trace("SET",zname,recname,zoneT,noUpdate)
       if zoneT then
          local t = RevConRecsT[zname]
          if not t then t={} RevConRecsT[zname]=t end
@@ -496,7 +497,15 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    -- Make sure sub-domain name is unique by checking name conflict in nameT
    local ix,orgn=0,name
    while db.nameGetDeviceT(zoneT.zid,name) do ix=ix+1 name=fmt("%s%d",orgn,ix) end
-   local dkey=db.addDevice(zoneT.zkey,name,ip,peername(cmd),getDnsType(hT),hT["X-Info"] or "", function() bindUpdateZone(zoneT) end)
+   local rname=db.zoneRname(zoneT.zid)
+   trace(rname)
+   if #rname > 0 then
+      rname=rname..name
+      ix,orgn=0,rname
+      while db.nameGetDeviceT(zoneT.zid,rname) do ix=ix+1 rname=fmt("%s%d",orgn,ix) end
+   end
+   trace(rname)
+   local dkey=db.addDevice(zoneT.zkey,name,rname,ip,peername(cmd),getDnsType(hT),hT["X-Info"] or "", function() bindUpdateZone(zoneT) end)
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
 
@@ -575,11 +584,11 @@ local function cmdGetWan(cmd,hT,zkey,zoneT)
 end
 
 local function cmdRevCon(cmd,hT,zkey,zoneT)
-   local dkey = lookupDev(cmd,hT)
+   local dkey,devT = lookupDev(cmd,hT)
    if not dkey then return end
    cmd:setstatus(202)
    cmd:flush()
-   rcBridge.newDevice(zoneT.zname,dkey,ba.socket.req2sock(cmd))
+   rcBridge.newDevice(zoneT.zname,devT.rname,dkey,ba.socket.req2sock(cmd))
 end
 
 -- All commands (functions)
@@ -773,13 +782,9 @@ local function cmsfunc(_ENV,relpath)
    if not zoneT then
       -- Is this a Reverse Connection (RC) FQN
       local dz,zone=host:match"([^%.]+)%.(.+)"
-      -- Length comes from RevConnBridge.lua a-> createSecret()
-      if dz and 32 == #dz then
-         local zT=db.znameGetZoneT(zone)
-         if zT then
-            rcBridge.newClient(request,dz,zone)
-            return
-         end
+      if rcBridge.getDz(dz) and db.znameGetZoneT(zone) then
+         rcBridge.newClient(request,dz,zone)
+         return
       end
       if serverIP==host then
          if isPrivateIP then

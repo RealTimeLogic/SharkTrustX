@@ -62,15 +62,17 @@ local function createSecret()
 end
 
 -- Set up a new idle (pending) device reverse connection
-local function newDevice(zname,dkey,sock)
+local function newDevice(zname,rname,dkey,sock)
    if not sock then return end
+   if rname and 0==#rname then rname=nil end
    dkey=dkey:lower()
    local deviceT = devicesT[dkey]
    if not deviceT then
       deviceT = {
          idleSocksT={},
          zname=zname,
-         dz=createSecret(),
+         rname=rname,
+         dz=rname or createSecret(),
          activeCons=0,
          lastActiveTime=ba.datetime"NOW",
          secretExpTime = ba.datetime"MAX"
@@ -173,7 +175,7 @@ end
 local function terminateIdleDevs()
    local now = ba.datetime"NOW"
    for dkey,deviceT in pairs(devicesT) do
-      if deviceT.secretExpTime < now then
+      if deviceT.secretExpTime < now and not deviceT.rname then
          removeRecord(deviceT.zname, deviceT.dz, true)
          dzT[deviceT.dz]=nil
          deviceT.dz=createSecret()
@@ -201,9 +203,10 @@ local function init(initT)
 end
    
 return {
-   newDevice=newDevice, -- (zname,dkey,sock)
+   newDevice=newDevice, -- (zname,rname,dkey,sock)
    removeDevice=removeDevice, -- (dkey)
    newClient=newClient, -- (cmd,dz,zone)
    getDevInfo=getDevInfo,
+   getDz=function(dz) return dz and dzT[dz] end,
    init=init, -- (initT)
 }
