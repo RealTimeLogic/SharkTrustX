@@ -1,4 +1,14 @@
-<?lsp local function emitEmailNotValid() ?>
+<?lsp
+
+local s=request:session()
+if not s or not s.userT then
+   local conf=require"loadconf"
+   if conf.settings.regauth ~= false then
+      response:sendredirect"login.html"
+   end
+end
+
+local function emitEmailNotValid() ?>
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-danger">

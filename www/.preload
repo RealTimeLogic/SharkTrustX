@@ -1,6 +1,4 @@
 
-mako.tldir:configure{priority=20} -- PATCH for test
-
 ba.thread.run(function() -- Entire file wrapped in a function
 
 local log -- function: see below
