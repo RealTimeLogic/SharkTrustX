@@ -12,6 +12,11 @@ SharkTrustX is a free product released under the MIT License. See the [SharkTrus
 
 The software requires two name servers listed in the configuration file. However, the software is currently limited to running on one VPS and the DNS A record for the three fields above must all point to the same VPS.
 
+## Tutorials
+
+* [Installing the SharkTrustX Portal](https://realtimelogic.com/articles/Installing-the-SharkTrustX-Portal)
+* [SharkTrustX Zone Management](https://realtimelogic.com/articles/SharkTrustX-Zone-Management)
+
 ## Customizing SharkTrustX
 
 1. Fork or clone this repository.
