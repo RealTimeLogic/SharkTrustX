@@ -18,7 +18,7 @@ if request:user() and zoneT and dname then
             regTime=ba.datetime(devT.regTime or "MIN"):ticks(),
             accessTime=ba.datetime(devT.accessTime or "MIN"):ticks(),
             dkey = adm and devT.dkey,
-            rname = 0~=#devT.rname and devT.rname,
+            rname = devT.rname and 0~=#devT.rname and devT.rname,
             setrname=power,
             canrem = power,
          }

@@ -279,7 +279,6 @@ local rcBridge=require"RevConnBridge"
 rcBridge.init{
    setRec=function(zname,recname, noUpdate)
       local zoneT = db.znameGetZoneT(zname)
-      trace("SET",zname,recname,zoneT,noUpdate)
       if zoneT then
          local t = RevConRecsT[zname]
          if not t then t={} RevConRecsT[zname]=t end
