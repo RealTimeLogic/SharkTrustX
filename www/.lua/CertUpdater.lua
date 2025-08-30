@@ -140,6 +140,14 @@ local function loadCert(certsL,nameT,wildcard)
    end
 end
 
+local function checkIfWildCertExp(name, minDate)
+   local c=rCert(name,true)
+   if not c then return true end
+   local expDate=getCertExpDate(nil, c)
+   return expDate < minDate
+end
+
+
 local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
    acmeOP=op
    admEmail=aEmail
@@ -179,7 +187,7 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
             end
          end
          for name,expDate in pairs(zonesT) do
-            if expDate <= minDate or not aio:stat(fmtCert(name,true)) then
+            if expDate <= minDate or checkIfWildCertExp(name, minDate) then
                busy=true
                updateWildcardCert(name, expDate > minDate, setDnsRecCB, remDnsRecCB, certUpdaterCo)
                coroutine.yield()
