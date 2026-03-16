@@ -2,7 +2,19 @@
 
 SharkTrust eXtended (SharkTrustX) is an extended version of [SharkTrust](https://github.com/RealTimeLogic/SharkTrust) that provides additional features such as remote access of private servers in addition to providing automatic SSL certificate management for Intranet web servers. Unlike SharkTrust, which works with any web server, SharkTrustX is designed exclusively for [Barracuda App Server](https://realtimelogic.com/products/barracuda-application-server/) powered products such as the [Mako Server](https://makoserver.net/).
 
-SharkTrustX is a free product released under the MIT License. See the [SharkTrustX product page](https://realtimelogic.com/products/SharkTrustX/) for additional information.
+See the [SharkTrustX product page](https://realtimelogic.com/products/SharkTrustX/) for additional information.
+
+## SharkTrustX Portal and Mako Server License
+
+The SharkTrustX Portal software is released under the MIT License and may be used, modified, and distributed free of charge in accordance with its terms.
+
+The SharkTrustX Portal runs on the Mako Server, which is separately licensed commercial software. However, when a Mako Server instance is used exclusively to operate a SharkTrustX Portal, a no-cost Mako Server license is automatically granted for that use.
+
+If the Mako Server is used for any purpose other than hosting the SharkTrustX Portal, a standard Mako Server license must be obtained.
+
+
+## Domain Names
+
 
 **NOTE:** The following domain names are used in the instructions below. Replace these names with your own such as xx.company.com.
 
