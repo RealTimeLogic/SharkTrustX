@@ -3,6 +3,14 @@
 if request:header"x-requested-with" then
    local enabled,err
    local data = request:data()
+   local function update(func)
+      local done
+      func(function() done=true end)
+      for _=1,100 do
+         if done then return true end
+         ba.sleep(50)
+      end
+   end
    -- Trim WS
    for k,v in pairs(data) do data[k]=v:gsub("^%s*(.-)%s*$", "%1") end
    if data.autoReg then
@@ -14,13 +22,33 @@ if request:header"x-requested-with" then
          enabled=false
          err="'SSO Settings' must be set"
       else
-         db.setSsoEnabled(zoneT.zid,enabled)
+         if update(function(done) db.setSsoEnabled(zoneT.zid,enabled,done) end) then
+            app.ssoClose(request:domain())
+         else
+            enabled=false
+            err="Database busy; try again"
+         end
       end
    elseif data.ssocfg then
       local cfg = ba.json.decode(data.ssocfg)
       if cfg then
-         enabled = true
-         db.setSsoCfg(zoneT.zid,cfg)
+         local current=db.getSsoCfg(zoneT.zid) or {}
+         if cfg.client_secret == "" then cfg.client_secret=current.client_secret end
+         local origin=request:url():match"^https?://[^/]+"
+         cfg.redirect_uri=origin and origin.."/ms-sso.html"
+         local y,m,d=(cfg.client_secret_expires or ""):match"^(%d%d%d%d)%-(%d%d)%-(%d%d)$"
+         local expires=y and ba.datetime(string.format("%s-%s-%sT23:59:59Z",y,m,d))
+         if #(cfg.tenant or "") > 5 and #(cfg.client_id or "") > 10 and
+            #(cfg.client_secret or "") > 10 and cfg.redirect_uri and expires then
+            enabled=update(function(done) db.setSsoCfg(zoneT.zid,cfg,done) end)
+            if enabled then
+               app.ssoClose(request:domain())
+            else
+               err="Database busy; try again"
+            end
+         else
+            err="Please enter valid Microsoft Entra settings"
+         end
       end
    elseif data.rname then
       db.zoneRname(zoneT.zid,data.rname)
@@ -31,8 +59,11 @@ end
 local ssoCfgT=db.getSsoCfg(zoneT.zid) or {
    tenant="",
    client_id="",
-   client_secret=""
+   client_secret="",
+   client_secret_expires=""
 }
+local redirectUri=(request:url():match"^https?://[^/]+" or "").."/ms-sso.html"
+local hasSecret=#(ssoCfgT.client_secret or "") > 0
 
 local rname=db.zoneRname(zoneT.zid)
 
@@ -69,7 +100,15 @@ local rname=db.zoneRname(zoneT.zid)
          </tr>
          <tr>
            <td>Client secret:</td>
-           <td><input type="text" value="<?lsp=ssoCfgT.client_secret?>" class="form-control" id="client_secret" placeholder="Enter client secret"/></td>
+           <td><input type="password" class="form-control" id="client_secret" placeholder="<?lsp=hasSecret and 'Leave blank to keep the current secret' or 'Enter client secret value'?>" autocomplete="new-password"/></td>
+         </tr>
+         <tr>
+           <td>Secret expiration:</td>
+           <td><input type="date" value="<?lsp=ssoCfgT.client_secret_expires or ''?>" class="form-control" id="client_secret_expires"/></td>
+         </tr>
+         <tr>
+           <td>Redirect URI:</td>
+           <td><code style="word-break:break-all"><?lsp=app.xssfilter(redirectUri)?></code><br/><small>Add this URI to the Entra app registration.</small></td>
          </tr>
        </table>
        <button id="ssobut" type="button" class="btn btn-primary">Save</button>
@@ -127,6 +166,7 @@ $(function() {
     $("#sso").click(function() {
         let self=$(this);
         const sso=self.prop("checked");
+        self.prop("disabled",true);
         $.getJSON(window.location,{sso:sso},function(rsp){
             self.prop("checked", rsp.enabled);
             if(rsp.err)
@@ -137,22 +177,31 @@ $(function() {
                 else
                     toastr.warning("Single Sign On Disabled");
             }
-        });
+        }).always(function(){self.prop("disabled",false)});
     });
     $("#ssobut").click(function() {
+        let button=$(this),label=button.html();
         let cfg={
             tenant:$("#tenant").val(),
             client_id:$("#client_id").val(),
-            client_secret:$("#client_secret").val()
+            client_secret:$("#client_secret").val(),
+            client_secret_expires:$("#client_secret_expires").val()
         }
-        if(cfg.tenant.length > 5 && cfg.client_id.length > 10 && cfg.client_secret.length > 10)
+        if(cfg.tenant.length > 5 && cfg.client_id.length > 10 &&
+           (cfg.client_secret.length > 10 || <?lsp=hasSecret and 'true' or 'false'?>) &&
+           cfg.client_secret_expires.length)
         {
-            $.getJSON(window.location,{ssocfg:JSON.stringify(cfg)},function(rsp){
+            button.prop("disabled",true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving');
+            $.ajax({url:window.location,type:"POST",dataType:"json",
+                    data:{ssocfg:JSON.stringify(cfg)}}).done(function(rsp){
                 if(rsp.err)
                     etoast(rsp.err);
-                 else
+                 else {
+                    $("#client_secret").val("");
                     toastr.success("Single Sign On Settings Saved");
-            });
+                 }
+            }).fail(function(){etoast("Cannot save Single Sign On settings")})
+              .always(function(){button.prop("disabled",false).html(label)});
         }
         else
             etoast("Please enter valid values");

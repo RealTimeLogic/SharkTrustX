@@ -804,6 +804,22 @@ dir:insert(cmsdir, true) -- Exec cmsdir:cmsfunc for all non found assets
 
 do -- SSO zone cache
    local ssoT={}
+   local function close(host)
+      local sso=ssoT[host]
+      if sso then
+         sso.close()
+         ssoT[host]=nil
+      end
+   end
+
+   function app.ssoClose(host)
+      if host then
+         close(host)
+      else
+         for name in pairs(ssoT) do close(name) end
+      end
+   end
+
    function app.sso(host)
       local sso=ssoT[host]
       if not sso then
@@ -812,12 +828,53 @@ do -- SSO zone cache
             return nil
          end
          local ssoCfgT=db.getSsoCfg(zoneT.zid)
-         local function ssolog(...) log(true,...) end
-         sso=require"ms-sso".init(ssoCfgT,"/ms-sso.html",ssolog)
+         if not ssoCfgT then return nil,"SSO is not configured" end
+         local changed=not ssoCfgT.redirect_uri or not ssoCfgT.client_secret_expires
+         ssoCfgT.redirect_uri=ssoCfgT.redirect_uri or "https://"..host.."/ms-sso.html"
+         local function ssolog(message) log(true,"SSO %s: %s",host,message) end
+         local function notify(event)
+            local msg=event.message..(event.expires and " Expiration: "..event.expires or "")
+            log(false,"SSO %s: %s",host,msg)
+            ba.thread.run(function()
+               local ok,err=require"log".sendmail{
+                  to=zoneT.admEmail,
+                  subject="Microsoft Entra credential: "..event.kind,
+                  body=msg.."\n\nZone: "..host
+               }
+               if not ok then log(true,"SSO notification email failed: %s",err) end
+            end)
+         end
+         local function savecredential(secret,metadata)
+            ssoCfgT.client_secret=secret
+            ssoCfgT.client_secret_expires=metadata.expires
+            local saved
+            db.setSsoCfg(zoneT.zid,ssoCfgT,function() saved=true end)
+            for _=1,100 do
+               if saved then return true end
+               ba.sleep(50)
+            end
+            return nil,"Database busy; the credential was not saved"
+         end
+         local ok,value=pcall(require"ms-sso".init,ssoCfgT,
+                              {log=ssolog,notify=notify,savecredential=savecredential})
+         if not ok then return nil,value end
+         sso=value
+         if changed then db.setSsoCfg(zoneT.zid,ssoCfgT) end
          ssoT[host]=sso
       end
       return sso
    end
+
+   for zid,zname in db.getZonesT() do
+      if db.getSsoEnabled(zid) then
+         local _,err=app.sso(zname)
+         if err then log(true,"Cannot initialize SSO for %s: %s",zname,err) end
+      end
+   end
 end
 
 end) -- End: Entire file wrapped in a function
+
+function onunload()
+   if app.ssoClose then app.ssoClose() end
+end

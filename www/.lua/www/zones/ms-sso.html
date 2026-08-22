@@ -1,73 +1,124 @@
 <?lsp
-local subj,msg
-local sso=app.sso(request:domain())
-if not sso or request:method() ~= "POST" then
-   response:sendredirect"/"
-end
-local header,payload=sso.login(request)
+local subj,msg,recovery
+local sso,ssoErr=app.sso(request:domain())
 
-if header and payload.preferred_username then
-   local email=payload.preferred_username
-   local userT = db.getUserT(zoneT.zid, email)
+local function esc(value)
+   return tostring(value or ""):gsub("[&<>\"']",{
+      ["&"]="&amp;",["<"]="&lt;",[">"]="&gt;",["\""]="&quot;",["'"]="&#39;"
+   })
+end
+
+local function login(payload)
+   local email=payload and payload.preferred_username
+   if not email then return "Login Failed","The Microsoft identity has no username" end
+   local userT=db.getUserT(zoneT.zid,email)
    if userT then
-      userT=app.login(request, zoneT, email, "", userT)
+      userT=app.login(request,zoneT,email,"",userT)
       if userT then
          request:session(true).userT=userT
          response:sendredirect"/"
       end
-      msg="Not authenticated"
-   else
-      if db.getAutoReg(zoneT.zid) then
-         local pending=true
-         db.addUser(zoneT.zid, email, "", false, function() pending=false end)
-         local ix=0
-         while ix < 60 and pending do
-            ba.sleep(50)
-            ix=ix+1
-         end
-         if pending then
-            msg="DB busy; try again"
-         else
-            userT=db.getUserT(zoneT.zid, email)
-            if userT then
-               userT=app.login(request, zoneT, email, "", userT)
-               if userT then
-                  request:session(true).userT=userT
-                  response:sendredirect"/"
-               end
-               msg="Not authenticated"
-            else
-               msg="User lookup failed; try again"
-            end
-         end
-      else
-         local dataT={
-            email=email,
-            autoReg=zoneT.autoReg,
-            zid=zoneT.zid,
-            sso=true
-         }
-         app.sendRegEmail(request,zoneT,dataT)
-         subj="Account Pending"
-         msg="Your account information has been sent to the zone administrator and will be reviewed for acceptance. You will receive an email when accepted"
-      end
+      return "Login Failed","Not authenticated"
    end
-else
-   msg = payload or "Unknown error"
+   if db.getAutoReg(zoneT.zid) then
+      local pending=true
+      db.addUser(zoneT.zid,email,"",false,function() pending=false end)
+      for _=1,60 do
+         if not pending then break end
+         ba.sleep(50)
+      end
+      if pending then return "Login Failed","Database busy; try again" end
+      userT=db.getUserT(zoneT.zid,email)
+      if userT then
+         userT=app.login(request,zoneT,email,"",userT)
+         if userT then
+            request:session(true).userT=userT
+            response:sendredirect"/"
+         end
+         return "Login Failed","Not authenticated"
+      end
+      return "Login Failed","User lookup failed; try again"
+   end
+   app.sendRegEmail(request,zoneT,{email=email,autoReg=zoneT.autoReg,
+                                  zid=zoneT.zid,sso=true})
+   return "Account Pending",
+          "Your account information has been sent to the zone administrator and will be reviewed for acceptance. You will receive an email when accepted"
 end
 
-if not subj then subj = "Login Failed" end
-
+local session=request:session()
+local data=request:data()
+if not sso then
+   local result=session and session.msSsoResult
+   if result then session.msSsoResult=nil end
+   subj,msg="Login Failed",result and result.message or ssoErr or "Single Sign On is not available"
+elseif request:method() == "POST" and data.recovery then
+   local ok,err
+   ok,err,recovery=sso.rotate(request,data.secret,data.expires,data.recovery)
+   if ok then return end
+   subj,msg="Credential Rotation Required",err
+elseif data.code or data.error then
+   local header,payload,codes
+   header,payload,codes,recovery=sso.login(request)
+   session=session or request:session(true)
+   if header then
+      subj,msg=login(payload)
+   else
+      subj,msg="Login Failed",payload
+      local labels={
+         [7000215]="The configured client secret is invalid.",
+         [7000222]="The configured client secret has expired."
+      }
+      if recovery then
+         for _,code in ipairs(type(codes) == "table" and codes or {}) do
+            if labels[tonumber(code)] then
+               subj,msg="Credential Rotation Required",labels[tonumber(code)]
+               break
+            end
+         end
+      end
+   end
+   session.msSsoResult={subject=subj,message=msg,recovery=recovery}
+   response:sendredirect"/ms-sso.html"
+else
+   local result=session and session.msSsoResult
+   if not result then response:sendredirect"/" end
+   session.msSsoResult=nil
+   subj,msg,recovery=result.subject or "Login Failed",result.message,result.recovery
+end
 ?>
 
 <section class="content">
-  <div class="card card-<?lsp=err and 'danger' or 'primary'?>">
-    <div class="card-header"><h3 class="card-title"><?lsp=subj?></h3></div>
+  <div class="card card-<?lsp=recovery and 'warning' or subj == 'Login Failed' and 'danger' or 'primary'?>">
+    <div class="card-header"><h3 class="card-title"><?lsp=esc(subj)?></h3></div>
     <div class="card-body">
       <div class="alert alert-info" role="alert">
-        <p><?lsp=msg?>.</p>
+        <p><?lsp=esc(msg)?></p>
       </div>
+<?lsp if recovery then ?>
+      <p>Create a new client secret in the configured Microsoft Entra app registration. Enter its <strong>Value</strong> and expiration date below. The new credential is tested by repeating sign-in before it is saved.</p>
+      <form method="post" id="sso-recovery" autocomplete="off">
+        <input type="hidden" name="recovery" value="<?lsp=esc(recovery)?>"/>
+        <div class="form-group">
+          <label for="client-secret">Client secret Value</label>
+          <input id="client-secret" name="secret" type="password" maxlength="512" class="form-control" required autocomplete="new-password"/>
+        </div>
+        <div class="form-group">
+          <label for="secret-expires">Expiration date</label>
+          <input id="secret-expires" name="expires" type="date" class="form-control" required/>
+        </div>
+        <button type="submit" class="btn btn-primary">Test and activate secret</button>
+      </form>
+<?lsp end ?>
     </div>
   </div>
 </section>
-
+<?lsp if recovery then ?>
+<script>
+$(function(){
+   $("#sso-recovery").on("submit",function(){
+      const button=$(this).find("button");
+      button.prop("disabled",true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Verifying');
+   });
+});
+</script>
+<?lsp end ?>

@@ -285,12 +285,12 @@ local function setAutoReg(zid, enable)
    dbExec(fmt("UPDATE zones SET autoReg=%d WHERE zid=%s", enable and 1 or 0, zid))
 end
 
-local function setSsoEnabled(zid, enable)
-   dbExec(fmt("UPDATE zones SET sso=%d WHERE zid=%s", enable and 1 or 0, zid))
+local function setSsoEnabled(zid, enable, func)
+   dbExec(fmt("UPDATE zones SET sso=%d WHERE zid=%s", enable and 1 or 0, zid),false,func)
 end
 
-local function setSsoCfg(zid, tab)
-   dbExec(fmt("UPDATE zones SET ssocfg=%s WHERE zid=%s", quote(ba.json.encode(tab)), zid))
+local function setSsoCfg(zid, tab, func)
+   dbExec(fmt("UPDATE zones SET ssocfg=%s WHERE zid=%s", quote(ba.json.encode(tab)), zid),false,func)
 end
 
 local function zoneRname(zid, rname) -- revcon prefix

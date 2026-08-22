@@ -29,6 +29,22 @@ The software requires two name servers listed in the configuration file. However
 * [Installing the SharkTrustX Portal](https://realtimelogic.com/articles/Installing-the-SharkTrustX-Portal)
 * [SharkTrustX Zone Management](https://realtimelogic.com/articles/SharkTrustX-Zone-Management)
 
+## Microsoft Entra SSO
+
+Microsoft Entra SSO is configured independently for each zone by that zone's
+administrator. In a customer deployment, this is the person responsible for
+the customer's Entra tenant and app registration, not the product engineer who
+built the BAS-powered product.
+
+The zone's **Settings** page shows the exact redirect URI to add to the Entra
+app registration. Enter the tenant ID, client ID, client secret **Value**, and
+the secret's expiration date. The expiration date enables advance email
+notifications to the zone owner using the Mako Server SMTP configuration.
+
+If Microsoft rejects an invalid or expired secret during login, the portal
+displays a credential-recovery form. The replacement secret is verified by a
+new Microsoft sign-in before it is saved for the zone.
+
 ## Customizing SharkTrustX
 
 1. Fork or clone this repository.
