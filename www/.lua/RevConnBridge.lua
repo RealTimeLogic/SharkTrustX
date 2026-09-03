@@ -1,12 +1,14 @@
 -- Reverse Connection Bridge
 
 local fmt=string.format
+local maxPending,pendingTimeout=16,15000
 
 -- devicesT: All devices:  key=dkey, val is a table with:
 --   activeCons - Active connections (client socks conns)
 --   dz - RevConn's Device-Zone name. FQN is: dz.zname
 --   lastActiveTime - When last revcon was established
 --   idleSocksT - table storing idle device cons: key=socket, val=function(sock)
+--   pending - FIFO browser connections waiting for the next device socket
 --   zname - zone name
 -- Note: a dkey is unique across all zones
 local devicesT={}
@@ -22,13 +24,11 @@ local setRecord -- function(zname, recordName)
 local removeRecord -- function(zname, recordName)
 
 -- Two cosocket instances per connection, one for server and one for client
-local function connectionBridge(source,deviceT,sink)
-   local isServer = not sink and true or false
-   if isServer then
+local function connectionBridge(source,deviceT,sink,deviceSide)
+   if deviceSide then
       deviceT.lastActiveTime=ba.datetime"NOW"
    end
-   local peer = source:peername()
-   if not sink then -- Idle device
+   if deviceSide and not sink then -- Idle device
       deviceT.idleSocksT[source]=function(sock) sink=sock end
    end
    local data,err = source:read()
@@ -38,14 +38,14 @@ local function connectionBridge(source,deviceT,sink)
       deviceT.idleSocksT[source]=nil
       return
    end
-   if isServer then
+   if deviceSide then
       deviceT.activeCons = deviceT.activeCons + 1
    end
    while data do
       if not sink:write(data,err) then break end
       data,err = source:read()
    end
-   if isServer then
+   if deviceSide then
       deviceT.activeCons = deviceT.activeCons - 1
       deviceT.idleSocksT[source]=nil
       if deviceT.activeCons == 0 then
@@ -54,6 +54,27 @@ local function connectionBridge(source,deviceT,sink)
    end
    source:close()
    sink:close()
+end
+
+local function unavailable(client)
+   if client.timer then client.timer:cancel() end
+   client.sock:write("HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+   client.sock:close()
+end
+
+local function connectClient(deviceT,deviceSock,client,idle)
+   if client.timer then client.timer:cancel() client.timer=nil end
+   deviceT.lastActiveTime=ba.datetime"NOW"
+   if idle then
+      local setSink=deviceT.idleSocksT[deviceSock]
+      deviceT.idleSocksT[deviceSock]=nil
+      setSink(client.sock)
+   else
+      deviceSock:event(connectionBridge,"s",deviceT,client.sock,true)
+   end
+   deviceSock:write(client.header)
+   if client.data then deviceSock:write(client.data) end
+   client.sock:event(connectionBridge,"s",deviceT,deviceSock)
 end
 
 local function createSecret()
@@ -70,6 +91,7 @@ local function newDevice(zname,rname,dkey,sock)
    if not deviceT then
       deviceT = {
          idleSocksT={},
+         pending={},
          zname=zname,
          rname=rname,
          dz=rname or createSecret(),
@@ -81,9 +103,14 @@ local function newDevice(zname,rname,dkey,sock)
       dzT[deviceT.dz] = deviceT
       setRecord(zname, deviceT.dz)
    end
-   tracep(9,"Device",fmt("https://%s.%s",deviceT.dz,zname), sock)
+   -- Generated reverse names are credentials and must not be logged.
+   tracep(9,"Device reverse connection",zname,sock)
+   deviceT.lastActiveTime=ba.datetime"NOW"
    sock:setoption("keepalive",true,240,240)
-   sock:event(connectionBridge,"s",deviceT)
+   local client=table.remove(deviceT.pending,1)
+   if client then connectClient(deviceT,sock,client) else
+      sock:event(connectionBridge,"s",deviceT,nil,true)
+   end
 end
 
 
@@ -95,12 +122,13 @@ local function removeDevice(dkey)
       for sock in pairs(deviceT.idleSocksT) do
          sock:close()
       end
+      for _,client in ipairs(deviceT.pending) do unavailable(client) end
       removeRecord(deviceT.zname, deviceT.dz)
    end
 end
 
 
-local function connectClient(deviceT, deviceSock, cmd)
+local function clientRequest(cmd)
    -- We must recreate the HTTP header for new requests (New socket connections)
    local method=cmd:method()
    local header=cmd:header()
@@ -117,19 +145,10 @@ local function connectClient(deviceT, deviceSock, cmd)
       table.insert(reqHeader,fmt("%s: %s",k,v))
    end
    table.insert(reqHeader,"\r\n")
-   local clientSock,data=ba.socket.req2sock(cmd, true)
-   --local clientSock,data=ba.socket.req2sock(cmd)
-   if clientSock then
-      local func=deviceT.idleSocksT[deviceSock]
-      deviceT.idleSocksT[deviceSock]=nil
-      func(clientSock)
-      deviceSock:write(table.concat(reqHeader,"\r\n"))
-      if data then deviceSock:write(data) end
-      clientSock:event(connectionBridge,"s", deviceT,deviceSock)
-   end
+   local sock,data=ba.socket.req2sock(cmd,true)
+   return sock and {sock=sock,data=data,header=table.concat(reqHeader,"\r\n")}
 end
 
--- Designed for LSP pages and may sleep for up to 50*20 milliseconds
 -- The code also includes logic for preventing a user from guessing the sub-domain (dz)
 local blockedIpT={}
 local function newClient(cmd,dz,zone)
@@ -140,25 +159,24 @@ local function newClient(cmd,dz,zone)
    end
    local deviceT = dzT[dz:lower()]
    if deviceT then
-      for i=1,50 do
-         local sock = next(deviceT.idleSocksT)
-         if sock then
-            connectClient(deviceT, sock, cmd)
-            return true
-         end
-         ba.sleep(20)
-      end
-      -- Giving up. No available reverse connection.
-      if (deviceT.lastActiveTime + {secs=40}) < ba.datetime"NOW" then
+      local deviceSock=next(deviceT.idleSocksT)
+      if not deviceSock and ((deviceT.lastActiveTime + {secs=40}) < ba.datetime"NOW" or
+         #deviceT.pending >= maxPending) then
          cmd:senderror(503)
          return false
       end
-      tracep(9,"Giving up")
-      cmd:setheader("Retry-After", "3")
-      cmd:setheader("Location",cmd:encoderedirecturl(cmd:url(),true,true))
-      cmd:setcontentlength(0)
-      cmd:setstatus(302)
-      return false
+      local client=clientRequest(cmd)
+      if not client then return false end
+      if deviceSock then connectClient(deviceT,deviceSock,client,true) else
+         table.insert(deviceT.pending,client)
+         client.timer=ba.timer(function()
+            for i,item in ipairs(deviceT.pending) do
+               if item == client then table.remove(deviceT.pending,i) unavailable(client) break end
+            end
+         end)
+         client.timer:set(pendingTimeout,true)
+      end
+      return true
    end
    -- domain not found
    -- Enable logic for preventing a user from guessing the sub-domain

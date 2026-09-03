@@ -1,7 +1,7 @@
 local db=[[
 PRAGMA foreign_keys = on;
 CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT);
-INSERT INTO config (key, value) values("version", "1.3");
+INSERT INTO config (key, value) values("version", "1.5");
 INSERT INTO config (key, value) values("rootUser","");
 INSERT INTO config (key, value) values("rootPwd","");
 CREATE TABLE zones(
@@ -26,6 +26,8 @@ CREATE TABLE devices(
    wanAddr TEXT,
    dns TEXT, -- 'local', 'wan', or 'both'
    info TEXT,
+   v2credHash TEXT,
+   v2credCreated TEXT,
    regTime TEXT,
    accessTime TEXT,
    zid INTEGER,
@@ -46,6 +48,8 @@ CREATE TABLE UsersDevAccess(
    FOREIGN KEY (uid) REFERENCES users(uid));
 
 CREATE UNIQUE INDEX UsersDevAccessIx ON UsersDevAccess (did, uid);
+CREATE UNIQUE INDEX DevicesV2CredHashIx ON devices (v2credHash);
+CREATE UNIQUE INDEX DevicesZoneNameIx ON devices (zid, name COLLATE NOCASE);
 ]]
 
 local su = require "sqlutil"
@@ -56,6 +60,16 @@ ALTER TABLE zones ADD COLUMN rname TEXT;
 ALTER TABLE devices ADD COLUMN rname TEXT;
 ]]
 
+local s13to14=[[
+ALTER TABLE devices ADD COLUMN v2credHash TEXT;
+ALTER TABLE devices ADD COLUMN v2credCreated TEXT;
+CREATE UNIQUE INDEX DevicesV2CredHashIx ON devices (v2credHash);
+]]
+
+local s14to15=[[
+CREATE UNIQUE INDEX DevicesZoneNameIx ON devices (zid, name COLLATE NOCASE);
+]]
+
 -- remove UNIQUE constraint on users.email
 local s11to12=[[
 CREATE TABLE newusers(uid INTEGER PRIMARY KEY,email TEXT,pwd TEXT,regTime TEXT,accessTime TEXT,poweruser INTEGER,zid INTEGER,FOREIGN KEY (zid) REFERENCES zones(zid));
@@ -64,25 +78,33 @@ DROP TABLE users;
 ALTER TABLE newusers RENAME TO users;
 ]]
 local function updateDB(conn,quote)
-   local ok,err,err2=true 
    local version = su.find(conn,"value FROM config WHERE key='version'")
-   assert(version and version >= "1.1", "DB too old")
-   if version < "1.2" then
-      ok,err,err2 = conn:mexec(s11to12)
-      trace("Upgrading DB 1.1 -> 1.2",ok or (err2 or err))
+   local function versionNumber(value)
+      if type(value) ~= "string" then return nil end
+      local major,minor=value:match("^(%d+)%.(%d+)$")
+      return major and tonumber(major) * 1000 + tonumber(minor)
    end
-   if ok then
-      conn:execute("UPDATE config SET value=1.2 WHERE key='version'")
-   end
-   if ok and version < "1.3" then
-      ok,err,err2 = conn:mexec(s12to13)
-      trace("Upgrading DB 1.2 -> 1.3",ok or (err2 or err))
-   end
-   if ok then
-      conn:execute("UPDATE config SET value=1.3 WHERE key='version'")
-   end
+   local current=versionNumber(version)
+   assert(current and current >= versionNumber"1.1", "DB too old")
+   assert(current <= versionNumber"1.5", "DB version is newer than this portal")
 
-   return ok,err,err2
+   local migrations={
+      {from="1.1", to="1.2", sql=s11to12},
+      {from="1.2", to="1.3", sql=s12to13},
+      {from="1.3", to="1.4", sql=s13to14},
+      {from="1.4", to="1.5", sql=s14to15}
+   }
+   for _,migration in ipairs(migrations) do
+      if current < versionNumber(migration.to) then
+         local ok,err,err2=conn:mexec(migration.sql)
+         trace(fmt("Upgrading DB %s -> %s",migration.from,migration.to),ok or (err2 or err))
+         if not ok then return ok,err,err2 end
+         ok,err,err2=conn:execute(fmt("UPDATE config SET value='%s' WHERE key='version'",migration.to))
+         if not ok then return ok,err,err2 end
+         current=versionNumber(migration.to)
+      end
+   end
+   return true
 end
 
 local function createDB(conn,quotestr)

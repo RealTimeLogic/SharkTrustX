@@ -6,17 +6,29 @@ local hio=ba.openio"home"
 local rw=require"rwfile"
 local fmt=string.format
 local sbyte=string.byte
-local supper=string.upper 
+local supper=string.upper
 local baexec=ba.exec
 
 -- For test purposes only
 local iswin=(function()
    local _,type=hio:resourcetype()
    if type == "windows" then
-      baexec=function(ex) trace("Dummy exec:",ex) return 0 end
+      baexec=function(ex) trace("Dummy exec:",ex) return "",0 end
       return true
    end
 end)()
+
+local function bindPath(path)
+   return iswin and path:gsub("^/", "") or path
+end
+
+local function openBindFile(path, mode)
+   return _G.io.open(bindPath(path), mode)
+end
+
+local function removeBindFile(path)
+   return os.remove(bindPath(path))
+end
 
 
 mako.createloader(io)
@@ -40,7 +52,7 @@ local ok,err=pcall(function()
   assert(type(settingsT.ns1) == 'string' and
          type(settingsT.ns2) == 'string' and
          type(settingsT.dn) == 'string')
-end) 
+end)
 if not ok then
    error"Invalid 'settings' table in mako.conf"
 end
@@ -168,7 +180,7 @@ file "/etc/bind/zones/%s.db";
 
 ]]
 local function updateNamedConf()
-   local fp=_G.io.open("/etc/bind/named.conf.local","w")
+   local fp=openBindFile("/etc/bind/named.conf.local","w")
    assert(fp, "'bind9' must be installed")
    for zid,zname in db.getZonesT() do
       fp:write(fmt(namedConfFmt,zname,zname))
@@ -179,18 +191,15 @@ end
 --  /etc/bind/zones/<name>.db
 local zonefmt=[[
 $TTL 900
-@ IN SOA ns1.%s. admin.%s. (
+@ IN SOA %s. admin.%s. (
 %d ; Serial
 3h ; Refresh
 1h ; Retry
 1w ; Expire
 900 ) ; Negative TTL cache
 ; name servers - NS records
-     IN      NS      ns1.%s.
-     IN      NS      ns2.%s.
-; name servers - A records
-ns1.%s.   86400 IN      A       %s
-ns2.%s.   86400 IN      A       %s
+     IN      NS      %s.
+     IN      NS      %s.
 ; DNS root domain
 %s. 86400 IN A %s
 %s. 86400 IN A %s
@@ -202,14 +211,12 @@ local RevConRecsT={} -- key=record-name,val=true
 local function bindzonedb(zoneT, txtRecsT)
    local resp={}
    local zname=zoneT.zname
-   local fp=_G.io.open(mkFullZname(zname),"w")
+   local fp=openBindFile(mkFullZname(zname),"w")
    fp:write(fmt(zonefmt,
-                zname,zname, -- SOA
+                settingsT.ns1,zname, -- SOA
                 os.time(), -- Serial
-                zname, -- NS record 1
-                zname, -- NS record 2
-                zname, settingsT.ipns1, -- NS A record one
-                zname, settingsT.ipns2, -- NS A record two
+                settingsT.ns1, -- NS record 1
+                settingsT.ns2, -- NS record 2
                 zname, settingsT.serverIP1,
                 zname, settingsT.serverIP2))
    local function emitRec(name,class,type,data)
@@ -234,12 +241,12 @@ local function bindzonedb(zoneT, txtRecsT)
       for rec in pairs(t) do emitRec(rec,"IN","A",ip) end
    end
 
-   -- Temporary TXT records used with LET's Encrypt
-   if txtRecsT then
-      for k,v in pairs(txtRecsT) do
-         emitRec(k..".", "IN", "TXT", v) -- Should be absolute: Add a .
-      end
-   end
+    -- Temporary TXT records used with LET's Encrypt
+    if txtRecsT then
+       for k,v in pairs(txtRecsT) do
+          fp:write(fmt("%s. 10 IN TXT %s\n",k,v))
+       end
+    end
    fp:close()
 end
 
@@ -282,7 +289,7 @@ rcBridge.init{
       if zoneT then
          local t = RevConRecsT[zname]
          if not t then t={} RevConRecsT[zname]=t end
-         t[recname]=true 
+         t[recname]=true
       end
       if not noUpdate then bindUpdateZone(zoneT) end
    end,
@@ -348,7 +355,7 @@ do -- scope
    local function userCanAccess(userType)
       return userType == "user" or not userType
    end
-   
+
    local powerUserTypeT={power=true,user=true}
    local function powerUserCanAccess(userType)
       return powerUserTypeT[userType] or not userType
@@ -410,7 +417,7 @@ local function deleteZone(zname)
       return log(true, "Terminating zone warn: cannot find %s",zname)
    end
    db.removeZone(zkey,function()
-      os.remove(mkFullZname(zname)) -- Delete bind's zone config file
+      removeBindFile(mkFullZname(zname)) -- Delete bind's zone config file
       updateNamedConf()
       execsbin("rndc","reconfig")
       certUpdater.removeZone(zname)
@@ -421,6 +428,21 @@ end
 local function deleteDevice(zoneT, dkey)
    db.removeDevice(dkey, function() bindUpdateZone(zoneT) end)
 end
+
+local sharkTrust=require"SharkTrust".init{
+   db=db,
+   bindUpdateZone=bindUpdateZone,
+   getRecsTfromZoneT=getRecsTfromZoneT,
+   peername=peername,
+   getProofKey=function(zoneT)
+      return PBKDF2Cache(zoneT.zkey, supper(zoneT.zsecret))
+   end,
+   reverseConnection=function(zoneT,devT,sock)
+      rcBridge.newDevice(zoneT.zname,devT.rname,devT.dkey,sock)
+   end,
+   log=log
+}
+app.sharkTrustCommand=sharkTrust.command
 
 -----------------------------------------------------------------------
 ------ Code for managing client commands sent to '/command.lsp' -------
@@ -501,13 +523,11 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
    local ix,orgn=0,name
    while db.nameGetDeviceT(zoneT.zid,name) do ix=ix+1 name=fmt("%s%d",orgn,ix) end
    local rname=db.zoneRname(zoneT.zid)
-   trace(rname)
    if #rname > 0 then
       rname=rname..name
       ix,orgn=0,rname
       while db.nameGetDeviceT(zoneT.zid,rname) do ix=ix+1 rname=fmt("%s%d",orgn,ix) end
    end
-   trace(rname)
    local dkey=db.addDevice(zoneT.zkey,name,rname,ip,peername(cmd),getDnsType(hT),hT["X-Info"] or "", function() bindUpdateZone(zoneT) end)
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
@@ -661,26 +681,47 @@ local function delayedLoad()
    if (not xio:stat"/etc/bind/zones/" and not xio:mkdir"/etc/bind/zones/") then
       error"Cannot access /etc/bind/zones/"
    end
-   baexec"/etc/init.d/bind9 stop"
    -- rebuild all 'bind' settings
+   local acmeSettings=settingsT.acme
+   local disableAcme=acmeSettings.disabled == true
+   assert(not disableAcme or iswin, "settings.acme.disabled is Windows test-only")
    for zid,zname,zkey in db.getZonesT() do
       local zoneT = db.znameGetZoneT(zname)
       bindzonedb(zoneT)
-      certUpdater.addZone(zname)
+      if not disableAcme then certUpdater.addZone(zname) end
    end
    updateNamedConf()
-   ba.sleep(1000)
-   baexec"/etc/init.d/bind9 start"
-   local a=settingsT.acme
+   local reconfig=execsbin("rndc","reconfig")
+   assert(reconfig.ecode == 0, "Cannot reconfigure BIND")
+   local reload=execsbin("rndc","reload")
+   assert(reload.ecode == 0, "Cannot reload BIND zones")
+   local a=acmeSettings
    local acmeOP={
       production=a.production,
       rsa=a.rsa,
       acceptterms=true,
    }
-   -- The portal (hostname) is not managed by 'bind' and dns-01, thus
-   -- cert fails for hostname on private network.
-   local domainsL=isPrivateIP and {} or {settingsT.dn}
-   certUpdater.start(domainsL, setDnsRec, remDnsRec,admEmail,acmeOP)
+   -- Static portal names use HTTP-01. Zone names use DNS-01 below.
+   local domainsL={}
+   if not isPrivateIP then
+      local seen={}
+      local function addDomain(name)
+         assert(type(name) == "string" and #name > 0,
+            "Invalid settings.acme.domains entry")
+         name=string.lower(name):gsub("%.$","")
+         if not seen[name] then seen[name]=true domainsL[#domainsL+1]=name end
+      end
+      addDomain(settingsT.dn)
+      if a.domains then
+         assert(type(a.domains) == "table", "settings.acme.domains must be a table")
+         for _,name in ipairs(a.domains) do addDomain(name) end
+      end
+   end
+   if disableAcme then
+      log(false, "Portal ACME disabled for Windows test")
+   else
+      certUpdater.start(domainsL, setDnsRec, remDnsRec,admEmail,acmeOP)
+   end
    log(false, "Ready %s", os.date())
 end
 ba.thread.run(delayedLoad)

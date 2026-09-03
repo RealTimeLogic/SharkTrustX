@@ -29,6 +29,13 @@ The software requires two name servers listed in the configuration file. However
 * [Installing the SharkTrustX Portal](https://realtimelogic.com/articles/Installing-the-SharkTrustX-Portal)
 * [SharkTrustX Zone Management](https://realtimelogic.com/articles/SharkTrustX-Zone-Management)
 
+## Device Protocol Documentation
+
+- [`doc/SharkTrust-Protocol.md`](doc/SharkTrust-Protocol.md) is the canonical
+  specification for the SharkTrust device-to-portal protocol.
+- [`doc/BACME-Protocol-Legacy.md`](doc/BACME-Protocol-Legacy.md) documents the legacy
+  header and refresh-token protocol used by older clients.
+
 ## Microsoft Entra SSO
 
 Microsoft Entra SSO is configured independently for each zone by that zone's
@@ -91,9 +98,16 @@ Create a mako.conf script and add instructions for loading SharkTrustX
 
 ```lua
 apps = {
-   { name='', path='SharkTrustEx/www'},
+   { name='', prio=1, path='SharkTrustEx/www'},
 }
 ```
+
+> [!IMPORTANT]
+> SharkTrustX must be loaded as a root application with priority 1 or higher.
+> The priority lets SharkTrustX receive reverse-connection requests before
+> Mako's built-in resources. Without it, built-in endpoints can intercept
+> requests such as TraceLogger WebSocket connections, which can cause an
+> unexpected authentication prompt followed by `503 Service Unavailable`.
 
 Add the following to mako.conf:
 
@@ -105,7 +119,10 @@ settings={
    ns2="acme2.realtimelogic.com",
    dn="acme.realtimelogic.com",
    acme={
-      production=true
+      production=true,
+      -- Optional additional public names served by this portal. The portal
+      -- name in settings.dn is always included automatically.
+      domains={"iot.company.com"}
    }
 }
 
@@ -119,11 +136,38 @@ log={
    }
 }
 ```
-Save the changes and start the Mako Server as user 'root'
+
+Set `settings.acme.production=false` while validating a deployment against the
+Let's Encrypt staging service. SharkTrustX keeps staging account and
+certificate files under `acmecert/` with a `staging.` filename prefix. The
+unprefixed production account and certificates remain available, so changing
+the setting regenerates and loads the selected profile without overwriting the
+other profile. The certificate private key is shared by both profiles.
+
+Names in `settings.acme.domains` use HTTP-01 and must have public A records
+pointing to the portal, with TCP port 80 reachable from the certificate
+authority. Configure additional portal names here rather than enabling Mako's
+separate top-level `acme` table: SharkTrustX must install the static, zone, and
+wildcard certificates together so one certificate manager owns the HTTPS
+listener.
+
+Save the changes and start the Mako Server as user `root`. If `mako.conf` loads
+the application with `prio=1` as shown above, start Mako normally:
 
 ```console
 mako
 ```
+
+When loading a deployed `SharkTrustX` application directly from the command
+line, specify the same priority explicitly:
+
+```console
+mako -l:1:SharkTrustX
+```
+
+Load the application by one method only. Do not load it from both `mako.conf`
+and the command line.
+
 You should see the following being printed in the console two minutes after starting the Mako Server.
 
 ```console

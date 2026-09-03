@@ -9,6 +9,7 @@ end
 local aio=ba.mkio(hio,"acmecert")
 local db=require"ZoneDB"
 local rw=require"rwfile"
+local profile=""
 
 -- List of "static" domains used by server. Key=domain,val=exptime (DateTime)
 local domainsT={}
@@ -16,6 +17,31 @@ local domainsT={}
 -- We create a wildcard cert and a regular cert for each zone
 local zonesT={}
 local zonesTMod=false
+
+-- Retry failed ACME requests with bounded backoff. Certificate expiration and
+-- retry scheduling are separate states: using an expiration sentinel for both
+-- can suppress a failed request until the process restarts.
+local retryDelays={60,300,900,3600,21600}
+local certRetryT={}
+local wildcardRetryT={}
+
+local function retryReady(retryT,name)
+   local retry=retryT[name]
+   return not retry or retry.at <= ba.datetime"NOW"
+end
+
+local function clearRetry(retryT,name)
+   retryT[name]=nil
+end
+
+local function scheduleRetry(retryT,name,certType)
+   local retry=retryT[name] or {attempt=0}
+   retry.attempt=math.min(retry.attempt+1,#retryDelays)
+   local delay=retryDelays[retry.attempt]
+   retry.at=ba.datetime("NOW",{secs=delay})
+   retryT[name]=retry
+   log(false,"Retrying %s certificate '%s' in %d seconds",certType,name,delay)
+end
 
 -- System's registered main contact
 local admEmail
@@ -25,12 +51,12 @@ local acmeOP
 
 -- Read or write account table
 local function account(accountT)
-   return rw.json(aio,"account",accountT)
+   return rw.json(aio,profile.."account",accountT)
 end
 
 -- Create and return certificate name
-local function fmtCert(name,wildcard)
-   return fmt(wildcard and "%s.wildcardcert" or "%s.cert",name)
+local function fmtCert(name,wildcard,prefix)
+   return (prefix or profile)..fmt(wildcard and "%s.wildcardcert" or "%s.cert",name)
 end
 -- Returns key,cert
 local function rCert(name,wildcard)
@@ -73,7 +99,7 @@ local function getAcmeOP(name,setDnsRecCB,remDnsRecCB)
             setDnsRecCB(name, dnsRecord, dnsData)
             ba.timer(function() resumeCB(true) end):set(wait4DNSTime, true)
          end,
-         remove=function(resumeCB,na,dnsRecord) -- (4)
+         remove=function(resumeCB,dnsRecord) -- (4)
             remDnsRecCB(name, dnsRecord)
             resumeCB(true)
          end,
@@ -90,42 +116,39 @@ local function updateCert(nameT, name, onDoneCB, setDnsRecCB, remDnsRecCB)
    local function onCert(key,cert)
       if key then
          assert(key == acmeOP.privkey)
+         clearRetry(certRetryT,name)
          nameT[name] = getCertExpDate(name,cert)
          account(accountT) -- May have been updated
          log(false,"%s certificate %s",rCert(name) and "Updating" or "Creating", fmtCert(name))
          wCert(name,cert)
       else
+         nameT[name] = ba.datetime"MIN"
          log(true, "Certificate request error '%s': %s",name, cert)
+         scheduleRetry(certRetryT,name,"regular")
       end
       onDoneCB()
    end
    acme.cert(accountT, name, onCert, op)
 end
 
--- Create/update both certificate and wildcard cert for name (domain).
--- Executes in the order (1) to (6) where (6) resumes coroutine caller 'onDoneCB'
-local function updateWildcardCert(name, onlyWcCert, setDnsRecCB, remDnsRecCB, onDoneCB)
-   local function doWildcardCert() -- (2)
-      -- Copy table
-      local op = getAcmeOP(name,setDnsRecCB, remDnsRecCB)
-      local accountT=account() or {email=admEmail}
-      local function onCert(key,cert) -- (5)
-         if cert and key == acmeOP.privkey then
-            account(accountT) -- May have been updated
-            log(false,"%s certificate %s",rCert(name,true) and "Updating" or "Creating", fmtCert(name,true))
-            wCert(name,cert,true)
-         else
-            log(true, "Certificate request error '%s': %s : %s",name, key, cert)
-         end
-         onDoneCB() -- (6)
+-- Create/update the wildcard certificate for name (domain).
+local function updateWildcardCert(name, setDnsRecCB, remDnsRecCB, onDoneCB)
+   local op = getAcmeOP(name,setDnsRecCB, remDnsRecCB)
+   local accountT=account() or {email=admEmail}
+   local function onCert(key,cert)
+      if cert and key == acmeOP.privkey then
+         clearRetry(wildcardRetryT,name)
+         account(accountT) -- May have been updated
+         log(false,"%s certificate %s",rCert(name,true) and "Updating" or "Creating", fmtCert(name,true))
+         wCert(name,cert,true)
+      else
+         -- The callback's key value may contain private-key material.
+         log(true, "Certificate request error '%s': %s",name, cert)
+         scheduleRetry(wildcardRetryT,name,"wildcard")
       end
-      acme.cert(accountT, "*."..name, onCert, op)
+      onDoneCB()
    end
-   if onlyWcCert then
-      doWildcardCert()
-   else
-      updateCert(zonesT,name,doWildcardCert,setDnsRecCB,remDnsRecCB)
-   end
+   acme.cert(accountT, "*."..name, onCert, op)
 end
 
 local function loadCert(certsL,nameT,wildcard)
@@ -150,7 +173,9 @@ end
 
 local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
    acmeOP=op
+   profile=op.production == false and "staging." or ""
    admEmail=aEmail
+   for name in pairs(zonesT) do zonesT[name]=getCertExpDate(name) end
    -- The private key used for all certs
    local privkey = rw.file(aio,"privkey.key")
    if privkey then
@@ -177,7 +202,7 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
       while true do
          local minDate = ba.datetime("NOW", {days=20}) -- Now + 20 days
          for name,expDate in pairs(domainsT) do
-            if expDate < minDate then
+            if expDate < minDate and retryReady(certRetryT,name) then
                busy=true
                -- Using http-01, not dns-01; (two last args not provided)
                updateCert(domainsT,name,certUpdaterCo)
@@ -187,9 +212,17 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
             end
          end
          for name,expDate in pairs(zonesT) do
-            if expDate <= minDate or checkIfWildCertExp(name, minDate) then
+            if expDate <= minDate and retryReady(certRetryT,name) then
                busy=true
-               updateWildcardCert(name, expDate > minDate, setDnsRecCB, remDnsRecCB, certUpdaterCo)
+               updateCert(zonesT,name,certUpdaterCo,setDnsRecCB,remDnsRecCB)
+               coroutine.yield()
+               busy=false
+               updated=true
+            end
+            if zonesTMod then break end -- restart if table modified
+            if checkIfWildCertExp(name, minDate) and retryReady(wildcardRetryT,name) then
+               busy=true
+               updateWildcardCert(name,setDnsRecCB,remDnsRecCB,certUpdaterCo)
                coroutine.yield()
                busy=false
                updated=true
@@ -240,15 +273,21 @@ end
 
 
 local function addZone(zone)
+   clearRetry(certRetryT,zone)
+   clearRetry(wildcardRetryT,zone)
    zonesT[zone]=getCertExpDate(zone)
    zonesTMod=true
 end
 
 local function removeZone(zone)
    zonesT[zone]=nil
+   clearRetry(certRetryT,zone)
+   clearRetry(wildcardRetryT,zone)
    zonesTMod=true
-   aio:remove(fmtCert(zone))
-   aio:remove(fmtCert(zone,true))
+   aio:remove(fmtCert(zone,nil,""))
+   aio:remove(fmtCert(zone,true,""))
+   aio:remove(fmtCert(zone,nil,"staging."))
+   aio:remove(fmtCert(zone,true,"staging."))
 end
 
 return {

@@ -19,28 +19,32 @@ local env, dbExec =
    local function commit()
       while true do
          local ok, err = wconn:commit "IMMEDIATE"
-         if ok then break end
+         if ok then return true end
          if err ~= "BUSY" then
             trace("ERROR: commit failed on exclusive connection:", err)
-            break
+            return nil,err
          end
       end
    end
 
    local function checkExec(sql, ok, err, err2)
       if not ok then
-         trace("SQL err:", err2 or err, sql)
+         -- SQL statements may contain zone, device, or credential material.
+         trace("SQL operation failed:", err2 or err)
       end
    end
 
    local dbthread = ba.thread.create()
    local function dbExec(sql, noCommit, func)
-      tracep(9,sql)
       dbthread:run(
          function()
-            if sql then checkExec(sql, wconn:execute(sql)) end
-            if not noCommit then commit() end
-            if func then func() end
+            local ok,err,err2=true
+            if sql then
+               ok,err,err2=wconn:execute(sql)
+               checkExec(sql,ok,err,err2)
+            end
+            if ok and not noCommit then ok,err=commit() end
+            if func then func(ok and true or false,err2 or err) end
          end
       )
    end
@@ -72,7 +76,7 @@ local function sqlIter(sql,tab)
    return function()
       local t, err = next()
       if t then return t end
-      if err then trace("Err:", err, sql) end
+      if err then trace("SQL read failed:", err) end
       closeConn(conn)
    end
 end
@@ -120,6 +124,10 @@ local function keyGetDeviceT(dkey)
    return dbFind(true, fmt("%s%s%s", "* FROM devices WHERE dkey=", quote(dkey), " COLLATE NOCASE"))
 end
 
+local function credentialHashGetDeviceT(hash)
+   return dbFind(true, fmt("%s%s", "* FROM devices WHERE v2credHash=", quote(hash)))
+end
+
 local function nameGetDeviceT(zid, name)
    return dbFind(true, fmt("%s%s and name=%s%s", "* FROM devices WHERE zid=", zid, quote(name), " COLLATE NOCASE"))
 end
@@ -165,7 +173,7 @@ local function getDevices4User(uid,tab)
          t[did] = true
          did,err = next()
       end
-      if err then trace("Err:", err, sql) end
+      if err then trace("Device access query failed:", err) end
       closeConn(conn)
       return t
    end
@@ -181,7 +189,7 @@ local function getZonesT()
    return function()
       local zid, zname, zkey = next()
       if zid then return zid, zname, zkey end
-      if zname then trace("Err:", zname, sql) end
+      if zname then trace("Zone query failed:", zname) end
       closeConn(conn)
    end
 end
@@ -222,7 +230,7 @@ local function getUsers(zid)
    return function()
       local uid,email,regTime,accessTime,poweruser = next()
       if uid then return uid,email,regTime,accessTime,poweruser  == "1" end
-      if email then trace("Err:", email, sql) end
+      if email then trace("User query failed:", email) end
       closeConn(conn)
    end
 end
@@ -336,7 +344,7 @@ end
 local function addDevice(zkey, name, rname, localAddr, wanAddr, dns, info, func)
    local zid = getZid4Zone(zkey)
    if not zid then
-      trace("zkey not found:", zkey)
+      trace("Zone key not found")
       return
    end
    if dbFind(false, fmt("%s%s AND name=%s%s", "dkey FROM devices WHERE zid=", zid, quote(name), " COLLATE NOCASE")) then
@@ -373,6 +381,51 @@ local function addDevice(zkey, name, rname, localAddr, wanAddr, dns, info, func)
    return dkey
 end
 
+local function addDeviceV2(zkey, name, rname, localAddr, wanAddr, dns, info, credentialHash, func)
+   local zid = getZid4Zone(zkey)
+   if not zid then
+      trace("zkey not found")
+      return
+   end
+   if dbFind(false, fmt("%s%s AND name=%s%s", "dkey FROM devices WHERE zid=", zid, quote(name), " COLLATE NOCASE")) then
+      trace("Err: device exists:", name)
+      return
+   end
+
+   local dkey
+   while true do
+      dkey = createHexKey(10)
+      if not dbFind(false, fmt("%s%s%s", "dkey FROM devices WHERE dkey=", quote(dkey), " COLLATE NOCASE")) then
+         break
+      end
+   end
+   local now = quotedNowTime()
+   local function completed(ok, err)
+      if func then func(ok, err, dkey) end
+   end
+   dbExec(
+      fmt(
+         "%s(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+         "INSERT INTO devices (name,rname,dkey,localAddr,wanAddr,dns,info,v2credHash,v2credCreated,regTime,accessTime,zid) VALUES",
+         quote(name),
+         quote(rname),
+         quote(dkey),
+         quote(localAddr),
+         quote(wanAddr),
+         quote(dns),
+         quote(info),
+         quote(credentialHash),
+         now,
+         now,
+         now,
+         zid
+      ),
+      false,
+      completed
+   )
+   return dkey
+end
+
 local function updateAddress4Device(dkey, localAddr, wanAddr, dns, func)
    dbExec(
       fmt(
@@ -388,8 +441,8 @@ local function updateAddress4Device(dkey, localAddr, wanAddr, dns, func)
    )
 end
 
-local function updateTime4Device(dkey)
-   dbExec(fmt("UPDATE devices SET accessTime=%s WHERE dkey=%s", quotedNowTime(), quote(dkey)))
+local function updateTime4Device(dkey, func)
+   dbExec(fmt("UPDATE devices SET accessTime=%s WHERE dkey=%s", quotedNowTime(), quote(dkey)),false,func)
 end
 
 local function removeDevice(dkey, func)
@@ -399,7 +452,7 @@ local function removeDevice(dkey, func)
       dbExec(fmt("%s%s%s", "DELETE FROM devices WHERE did=", t.did, " COLLATE NOCASE"), false, func)
       rcBridge.removeDevice(dkey)
    else
-      trace("Not found", dkey)
+      trace("Device not found")
    end
 end
 
@@ -429,7 +482,7 @@ local function setPoweruser(uid, poweruser)
    dbExec(fmt("UPDATE users SET poweruser=%d WHERE uid=%s", poweruser and 1 or 0, uid))
 end
 
--- Create an entry in UserDevAccess if the entry does not exist 
+-- Create an entry in UserDevAccess if the entry does not exist
 local function createUserDevAccess(uid,did,noCommit)
       -- Execute UPSERT
       dbExec(
@@ -464,6 +517,7 @@ end
 
 return {
    addDevice = addDevice, -- (zkey, name, rname, localAddr, wanAddr, dns, info, func)
+   addDeviceV2 = addDeviceV2,
    addUser = addUser, -- (zid, email, pwd, poweruser)
    addZone = addZone, -- (zname, admEmail, admPwd, func)
    countDevices4Zone = countDevices4Zone, -- (zid)
@@ -483,6 +537,7 @@ return {
    zoneRname=zoneRname,
    setDevRname=setDevRname,
    keyGetDeviceT = keyGetDeviceT, -- (dkey)
+   credentialHashGetDeviceT = credentialHashGetDeviceT,
    nameGetDeviceT = nameGetDeviceT, -- (zid, name)
    removeDevice = removeDevice, -- (dkey, func)
    removeUsers=removeUsers, -- (uidL)
