@@ -253,14 +253,16 @@ X-SharkTrust-Proof: <base64url-hmac-sha-256>
 | `command` | Yes | Must be the case-sensitive value `Register`. |
 | `name` | No | DNS label or full name in the selected zone. Defaults to `device`. The label contains 1 to 63 lowercase letters, digits, or hyphens and cannot start or end with a hyphen. |
 | `namePolicy` | No | `exact` or `increment`. With an explicit name, the default is `exact`. The field has no effect when `name` is omitted. |
-| `ipAddress` | Yes | IPv4 address in dotted-decimal form. |
+| `ipAddress` | Yes | Device's local IPv4 address in dotted-decimal form. The standard client discovers and adds this value automatically; it is not an application setting. |
 | `dns` | No | `local`, `wan`, or `both`. Defaults to `local`. |
 | `info` | No | Printable UTF-8 device description of at most 256 bytes. |
 
-The `dns` value determines which address the portal publishes:
+The portal stores `ipAddress` as the local address and the connection's peer
+address as the WAN address. The `dns` value determines which stored address the
+portal publishes:
 
-- `local` publishes the address supplied in `ipAddress`.
-- `wan` publishes the public peer address observed by the portal.
+- `local` publishes the device-supplied local address.
+- `wan` publishes the latest public peer address observed by the portal.
 - `both` publishes both addresses when they differ.
 
 SharkTrust does not create a NAT rule, port-forwarding rule, or firewall rule.
@@ -344,9 +346,10 @@ Request:
 }
 ```
 
-`ipAddress` is required. `dns` is optional and defaults to `local`. The command
-updates the local address, observed WAN address, DNS selection, and last-access
-time. The result contains the assigned full device name.
+`ipAddress` is required. `dns` is optional; when omitted, the portal preserves
+the mode selected during enrollment. The command updates the local address,
+observed WAN address, DNS selection, and last-access time. The result contains
+the assigned full device name. The simplified Lua method omits `dns`.
 
 ### 7.4 SetAcmeRecord
 

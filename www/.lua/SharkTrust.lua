@@ -427,7 +427,7 @@ local function commandSetIpAddress(cmd, data, devT, zoneT, response, deferredSta
    if not validIPv4(data.ipAddress) then
       return failure(cmd, 400, "invalid_ip_address", "ipAddress must be an IPv4 address.")
    end
-   local dns = data.dns or "local"
+   local dns = data.dns or devT.dns
    if not validDnsType(dns) then
       return failure(cmd, 400, "invalid_dns_mode", "dns must be local, wan, or both.")
    end
