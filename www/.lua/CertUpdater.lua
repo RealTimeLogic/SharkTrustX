@@ -1,7 +1,9 @@
 local wait4DNSTime=12000
 
 local fmt=string.format
-local acme = require"acme/engine"
+local Engine=require"acme/engine"
+local engine=assert(Engine.create())
+local install=require"acme/_server"(ba.tpm)
 local hio = ba.openio"home"
 if not hio:stat"acmecert" and not hio:mkdir"acmecert" then
    error("Cannot create directory "..hio:realpath"acmecert")
@@ -9,7 +11,7 @@ end
 local aio=ba.mkio(hio,"acmecert")
 local db=require"ZoneDB"
 local rw=require"rwfile"
-local profile=""
+local profile,service,certKey=""
 
 -- List of "static" domains used by server. Key=domain,val=exptime (DateTime)
 local domainsT={}
@@ -46,12 +48,26 @@ end
 -- System's registered main contact
 local admEmail
 
--- Options used with acme.cert(...,op)
-local acmeOP
+local function tpmKey(value,name,curve)
+   if type(value) == "string" then
+      local old=ba.json.decode(value)
+      value={provider="tpm",name=old.keyname,options={curve=old.curve or curve}}
+   elseif not value then
+      value={provider="tpm",name=name,options={curve=curve}}
+   end
+   if not ba.tpm.haskey(value.name) then ba.tpm.createkey(value.name,value.options) end
+   return value
+end
 
--- Read or write account table
+-- Read or write the account table and migrate former field names in memory.
 local function account(accountT)
-   return rw.json(aio,profile.."account",accountT)
+   if accountT then return rw.json(aio,profile.."account",accountT) end
+   accountT=rw.json(aio,profile.."account") or {email=admEmail}
+   accountT.url=accountT.url or accountT.id
+   accountT.id=nil
+   accountT.directoryUrl=accountT.directoryUrl or service.directoryUrl
+   accountT.key=tpmKey(accountT.key,"$account","SECP256R1")
+   return accountT
 end
 
 -- Create and return certificate name
@@ -90,65 +106,62 @@ local function getCertExpDate(domainname, cert)
 end
 
 
-local function getAcmeOP(name,setDnsRecCB,remDnsRecCB)
-   local op = {} for k,v in pairs(acmeOP) do op[k]=v end
-   if setDnsRecCB then
-      op.ch = {
-         type ="dns-01",
-         set=function(dnsRecord, dnsData, resumeCB) -- (3)
-            setDnsRecCB(name, dnsRecord, dnsData)
-            ba.timer(function() resumeCB(true) end):set(wait4DNSTime, true)
-         end,
-         remove=function(resumeCB,dnsRecord) -- (4)
-            remDnsRecCB(name, dnsRecord)
-            resumeCB(true)
-         end,
-      }
-   end
-   return op
+local function challenge(name,setDnsRecCB,remDnsRecCB)
+   if not setDnsRecCB then return end
+   return {
+      type="dns-01",
+      present=function(_,context,resumeCB)
+         setDnsRecCB(name,context.recordName,context.recordData)
+         ba.timer(function() resumeCB(true) end):set(wait4DNSTime,true)
+      end,
+      cleanup=function(_,context,resumeCB)
+         remDnsRecCB(name,context.recordName)
+         resumeCB(true)
+      end
+   }
 end
 
 
 local function updateCert(nameT, name, onDoneCB, setDnsRecCB, remDnsRecCB)
    nameT[name] = ba.datetime"MAX" -- stop trying to update
-   local op = getAcmeOP(name,setDnsRecCB, remDnsRecCB)
-   local accountT=account() or {email=admEmail}
-   local function onCert(key,cert)
-      if key then
-         assert(key == acmeOP.privkey)
+   local accountT=account()
+   local function onCert(result,problem)
+      if result then
          clearRetry(certRetryT,name)
-         nameT[name] = getCertExpDate(name,cert)
-         account(accountT) -- May have been updated
+         nameT[name] = getCertExpDate(name,result.certificate)
+         account(result.account)
          log(false,"%s certificate %s",rCert(name) and "Updating" or "Creating", fmtCert(name))
-         wCert(name,cert)
+         wCert(name,result.certificate)
       else
          nameT[name] = ba.datetime"MIN"
-         log(true, "Certificate request error '%s': %s",name, cert)
+         log(true,"Certificate request error '%s': %s",name,
+             type(problem)=="table" and (problem.message or problem.code) or tostring(problem))
          scheduleRetry(certRetryT,name,"regular")
       end
       onDoneCB()
    end
-   acme.cert(accountT, name, onCert, op)
+   engine:certificate(service,accountT,{domain=name,acceptTerms=true,
+      challenge=challenge(name,setDnsRecCB,remDnsRecCB),key={privateKey=certKey}},onCert)
 end
 
 -- Create/update the wildcard certificate for name (domain).
 local function updateWildcardCert(name, setDnsRecCB, remDnsRecCB, onDoneCB)
-   local op = getAcmeOP(name,setDnsRecCB, remDnsRecCB)
-   local accountT=account() or {email=admEmail}
-   local function onCert(key,cert)
-      if cert and key == acmeOP.privkey then
+   local accountT=account()
+   local function onCert(result,problem)
+      if result then
          clearRetry(wildcardRetryT,name)
-         account(accountT) -- May have been updated
+         account(result.account)
          log(false,"%s certificate %s",rCert(name,true) and "Updating" or "Creating", fmtCert(name,true))
-         wCert(name,cert,true)
+         wCert(name,result.certificate,true)
       else
-         -- The callback's key value may contain private-key material.
-         log(true, "Certificate request error '%s': %s",name, cert)
+         log(true,"Certificate request error '%s': %s",name,
+             type(problem)=="table" and (problem.message or problem.code) or tostring(problem))
          scheduleRetry(wildcardRetryT,name,"wildcard")
       end
       onDoneCB()
    end
-   acme.cert(accountT, "*."..name, onCert, op)
+   engine:certificate(service,accountT,{domain="*."..name,acceptTerms=true,
+      challenge=challenge(name,setDnsRecCB,remDnsRecCB),key={privateKey=certKey}},onCert)
 end
 
 local function loadCert(certsL,nameT,wildcard)
@@ -156,7 +169,7 @@ local function loadCert(certsL,nameT,wildcard)
       local cert = rCert(name,wildcard)
       tracep(9,fmt("%s%s",wildcard and "*." or "", name), cert and "OK" or "failed!")
       if cert then
-         table.insert(certsL, cert)
+         table.insert(certsL,{privateKey=certKey,certificate=cert})
       else
          log(false, "Cert %s not found",fmtCert(name,wildcard))
       end
@@ -172,24 +185,22 @@ end
 
 
 local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
-   acmeOP=op
    profile=op.production == false and "staging." or ""
    admEmail=aEmail
+   local production=op.production ~= false
+   service={production=production,productionUrl=op.productionUrl,stagingUrl=op.stagingUrl,
+      directoryUrl=production and (op.productionUrl or "https://acme-v02.api.letsencrypt.org/directory") or
+         (op.stagingUrl or "https://acme-staging-v02.api.letsencrypt.org/directory")}
    for name in pairs(zonesT) do zonesT[name]=getCertExpDate(name) end
    -- The private key used for all certs
    local privkey = rw.file(aio,"privkey.key")
-   if privkey then
-      if true == op.rsa then op.privkey=privkey end
-   else
-      if true == op.rsa then
-         log(false, "Creating RSA private key")
-         privkey=ba.create.key({key="rsa",bits=op.bits})
-         rw.file(aio,"privkey.key",privkey)
-         op.privkey=privkey
-      else
-         op.privkey=acme.createkey("SharkTrustX.PrivKey",{curve=op.curve or "SECP384R1"})
-      end
+   if not privkey then
+      if op.rsa then log(false,"Creating RSA private key") end
+      privkey=op.rsa and engine:createKey("SharkTrustX.PrivKey",{type="rsa",bits=op.bits}) or
+         tpmKey(nil,"SharkTrustX.PrivKey",op.curve or "SECP384R1")
+      if type(privkey) == "string" then rw.file(aio,"privkey.key",privkey) end
    end
+   certKey=privkey
    for _,domain in ipairs(domainsL) do
       domainsT[domain] = getCertExpDate(domain)
    end
@@ -230,29 +241,14 @@ local function start(domainsL, setDnsRecCB, remDnsRecCB, aEmail, op)
             if zonesTMod then break end -- restart if table modified
          end
          if updated then
-            local certsL={},{}
+            local certsL={}
             loadCert(certsL,domainsT,false)
             loadCert(certsL,zonesT,false)
             loadCert(certsL,zonesT,true)
             if #certsL > 0 then
-               local shark=ba.create.sharkssl(nil,{server=true})
-               for _,cert in ipairs(certsL) do
-                  local kn=acme.useTPM(acmeOP.privkey)
-                  local scert,err
-                  if kn then
-                     scert,err = ba.tpm.sharkcert(kn, cert)
-                  else
-                     scert,err = ba.create.sharkcert(cert, acmeOP.privkey)
-                  end
-                  if scert then
-                     shark:addcert(scert)
-                  else
-                     log(true, "Creating shark-cert failed: %s\n%s", err or "unknown err", cert)
-                  end
-               end
-               local cfg = {shark=shark}
-               if ba.slcon then ba.slcon = ba.create.servcon(ba.slcon,cfg) end
-               if ba.slcon6 then ba.slcon6 = ba.create.servcon(ba.slcon6,cfg) end
+               install(certsL,function(ok,problem)
+                  if not ok then log(true,"Creating shark-cert failed: %s",tostring(problem)) end
+               end)
             else
                log(false,"Warn: no certificates to load!")
             end

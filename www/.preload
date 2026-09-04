@@ -63,11 +63,20 @@ assert(type(admEmail=="string", "mako.conf missing log.smpt.to"))
 settingsT.ipns1,settingsT.ipns2=
    ba.socket.toip(settingsT.ns1),ba.socket.toip(settingsT.ns2)
 
+local function socketIp(s)
+   local ip,_,is6=s:sockname()
+   return is6 and ip:sub(1,7)=="::ffff:" and ip:sub(8) or ip
+end
+
+local function privateIp(ip)
+   local a,b=ip:match"^(%d+)%.(%d+)%.%d+%.%d+$"
+   a,b=tonumber(a),tonumber(b)
+   return a==10 or a==172 and b>=16 and b<=31 or a==192 and b==168
+end
+
 -- Fetch our own IP address and resolve domain name 'ns1' or 'ns2'
 -- (future proof)
 local serverIP,isPrivateIP = (function()
-   local d=require"acme/dns"
-   assert(d.isPrivateIP,"Server too old, please upgrade")
    local ip,s
    if settingsT.ip then
       ip=settingsT.ip
@@ -75,10 +84,10 @@ local serverIP,isPrivateIP = (function()
       while not s do
          s=ba.socket.connect("google.com",80)
       end
-      ip=d.socPeerName(s)
+      ip=socketIp(s)
       s:close()
    end
-   local ispriv=d.isPrivateIP(ip)
+   local ispriv=privateIp(ip)
    tracep(false,2,fmt("Server deployed on %s, IP address: %s", ispriv and "a private network" or "the public Internet",ip))
    return ip,ispriv
 end)()
@@ -698,6 +707,8 @@ local function delayedLoad()
    local a=acmeSettings
    local acmeOP={
       production=a.production,
+      productionUrl=a.productionUrl,
+      stagingUrl=a.stagingUrl,
       rsa=a.rsa,
       acceptterms=true,
    }

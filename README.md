@@ -120,6 +120,9 @@ settings={
    dn="acme.realtimelogic.com",
    acme={
       production=true,
+      -- ECC certificate keys use the Mako TPM by default. Set rsa=true to
+      -- create and use a software RSA certificate key instead.
+      rsa=false,
       -- Optional additional public names served by this portal. The portal
       -- name in settings.dn is always included automatically.
       domains={"iot.company.com"}
@@ -143,6 +146,13 @@ certificate files under `acmecert/` with a `staging.` filename prefix. The
 unprefixed production account and certificates remain available, so changing
 the setting regenerates and loads the selected profile without overwriting the
 other profile. The certificate private key is shared by both profiles.
+
+SharkTrustX always keeps its ACME account key as an ECC key in the Mako TPM.
+Certificate keys are also ECC and TPM-backed by default. Setting
+`settings.acme.rsa=true` selects a software RSA certificate key instead. The
+Mako TPM interface supports ECC keys only and is therefore never used for RSA
+key generation. The selection applies when the certificate key is first
+created; an existing key is reused.
 
 Names in `settings.acme.domains` use HTTP-01 and must have public A records
 pointing to the portal, with TCP port 80 reachable from the certificate
