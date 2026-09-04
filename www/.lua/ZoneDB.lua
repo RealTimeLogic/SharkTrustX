@@ -9,7 +9,7 @@ end
 
 -- Encapsulation of the connection used exclusively for writing
 -- dbExec(sql, noCommit, func)  -- Async DB insert with optional callback
-local env, dbExec =
+local env, dbExec, dbTask =
    (function()
    local env, wconn = io:dofile(".lua/CreateDB.lua",_ENV)() -- Requires env:io
    assert(env, fmt("Cannot open zones.db: %s", wconn))
@@ -24,6 +24,7 @@ local env, dbExec =
             trace("ERROR: commit failed on exclusive connection:", err)
             return nil,err
          end
+         ba.sleep(10)
       end
    end
 
@@ -48,7 +49,22 @@ local env, dbExec =
          end
       )
    end
-   return env, dbExec
+   local function dbTask(task,func)
+      dbthread:run(
+         function()
+            local ok,result=pcall(task,wconn,commit)
+            if not ok then
+               trace("Database transaction failed:",result)
+               local callOk,rollbackOk,rollbackErr=pcall(function() return wconn:rollback "IMMEDIATE" end)
+               if not callOk or not rollbackOk then
+                  trace("Database rollback failed:",rollbackErr or rollbackOk)
+               end
+            end
+            if func then func(ok,result) end
+         end
+      )
+   end
+   return env, dbExec, dbTask
 end)()
 
 local quote = env.quotestr
@@ -289,8 +305,8 @@ local function updateUSerPwd(zid, email, pwd)
    dbExec(fmt("UPDATE users SET pwd=%s WHERE zid=%s AND email=%s COLLATE NOCASE", quote(pwd), zid, quote(email)))
 end
 
-local function setAutoReg(zid, enable)
-   dbExec(fmt("UPDATE zones SET autoReg=%d WHERE zid=%s", enable and 1 or 0, zid))
+local function setAutoReg(zid, enable, func)
+   dbExec(fmt("UPDATE zones SET autoReg=%d WHERE zid=%s", enable and 1 or 0, zid),false,func)
 end
 
 local function setSsoEnabled(zid, enable, func)
@@ -301,15 +317,15 @@ local function setSsoCfg(zid, tab, func)
    dbExec(fmt("UPDATE zones SET ssocfg=%s WHERE zid=%s", quote(ba.json.encode(tab)), zid),false,func)
 end
 
-local function zoneRname(zid, rname) -- revcon prefix
+local function zoneRname(zid, rname, func) -- revcon prefix
    if not rname then
       return dbFind(false,fmt("%s%s%s","rname FROM zones WHERE zid=",zid," COLLATE NOCASE")) or ""
    end
-   dbExec(fmt("UPDATE zones SET rname=%s WHERE zid=%s", quote(rname), zid))
+   dbExec(fmt("UPDATE zones SET rname=%s WHERE zid=%s", quote(rname), zid),false,func)
 end
 
-local function setDevRname(did, rname) -- revcon prefix
-   dbExec(fmt("UPDATE devices SET rname=%s WHERE did=%s", quote(rname), did))
+local function setDevRname(did, rname, func) -- revcon prefix
+   dbExec(fmt("UPDATE devices SET rname=%s WHERE did=%s", quote(rname), did),false,func)
 end
 
 
@@ -448,12 +464,81 @@ end
 local function removeDevice(dkey, func)
    local t = keyGetDeviceT(dkey)
    if t then
-      dbExec(fmt("%s%s", "DELETE FROM UsersDevAccess WHERE did=", t.did), true)
-      dbExec(fmt("%s%s%s", "DELETE FROM devices WHERE did=", t.did, " COLLATE NOCASE"), false, func)
-      rcBridge.removeDevice(dkey)
+      dbTask(function(conn,commit)
+         local ok,err,err2=conn:execute("DELETE FROM UsersDevAccess WHERE did="..assert(tonumber(t.did)))
+         if not ok then error(err2 or err) end
+         ok,err,err2=conn:execute("DELETE FROM devices WHERE did="..assert(tonumber(t.did)))
+         if not ok then error(err2 or err) end
+         ok,err=commit()
+         if not ok then error(err) end
+         local bridgeOk,bridgeErr=pcall(rcBridge.removeDevice,dkey)
+         if not bridgeOk then trace("Reverse-connection cleanup failed:",bridgeErr) end
+         return true
+      end,function(ok,result)
+         if func then func(ok,ok and nil or result) end
+      end)
    else
       trace("Device not found")
+      if func then func(false,"not found") end
    end
+end
+
+local function getInactiveDevices(zid,cutoff)
+   local conn=openConn()
+   local rows={}
+   local next=su.iter(conn,fmt(
+      "did,name,dkey,accessTime FROM devices WHERE zid=%s AND accessTime < %s ORDER BY accessTime,name COLLATE NOCASE",
+      zid,quote(cutoff)),true)
+   while true do
+      local row,err=next()
+      if not row then
+         closeConn(conn)
+         if err then
+            trace("Inactive-device query failed:",err)
+            return nil,err
+         end
+         return rows
+      end
+      local _,active=rcBridge.getDevInfo(row.dkey)
+      if not active then rows[#rows+1]=row end
+   end
+end
+
+local function removeInactiveDevices(zid,cutoff,eligible,func)
+   dbTask(function(conn,commit)
+      local rows={}
+      local next=su.iter(conn,fmt(
+         "did,name,dkey,accessTime FROM devices WHERE zid=%s AND accessTime < %s ORDER BY accessTime,name COLLATE NOCASE",
+         zid,quote(cutoff)),true)
+      while true do
+         local row,err=next()
+         if not row then
+            if err then error(err) end
+            break
+         end
+         local _,active=rcBridge.getDevInfo(row.dkey)
+         if not active and eligible[tostring(row.did)] then rows[#rows+1]=row end
+      end
+
+      if #rows > 0 then
+         local ids={}
+         for _,row in ipairs(rows) do ids[#ids+1]=assert(tonumber(row.did)) end
+         local idList=table.concat(ids,",")
+         local ok,err,err2=conn:execute("DELETE FROM UsersDevAccess WHERE did IN ("..idList..")")
+         if not ok then error(err2 or err) end
+         ok,err,err2=conn:execute(fmt(
+            "DELETE FROM devices WHERE zid=%s AND did IN (%s) AND accessTime < %s",
+            zid,idList,quote(cutoff)))
+         if not ok then error(err2 or err) end
+      end
+      local ok,err=commit()
+      if not ok then error(err) end
+      for _,row in ipairs(rows) do
+         local bridgeOk,bridgeErr=pcall(rcBridge.removeDevice,row.dkey)
+         if not bridgeOk then trace("Reverse-connection cleanup failed:",bridgeErr) end
+      end
+      return rows
+   end,func)
 end
 
 local function addUser(zid, email, pwd, poweruser, func)
@@ -527,6 +612,7 @@ return {
    getDevices4User=getDevices4User, -- (uid)
    getDevices4Wan = getDevices4Wan, -- (zid, wanAddr)
    getDevices4ZoneT = getDevices4ZoneT, -- (zid)
+   getInactiveDevices=getInactiveDevices, -- (zid, cutoff)
    getUserT = getUserT, -- (zid, email)
    getUsers=getUsers, -- (zid)
    getWanL = getWanL, -- (zid)
@@ -540,6 +626,7 @@ return {
    credentialHashGetDeviceT = credentialHashGetDeviceT,
    nameGetDeviceT = nameGetDeviceT, -- (zid, name)
    removeDevice = removeDevice, -- (dkey, func)
+   removeInactiveDevices=removeInactiveDevices, -- (zid, cutoff, eligible, func)
    removeUsers=removeUsers, -- (uidL)
    removeZone = removeZone, -- (zkey)
    setAutoReg=setAutoReg, -- (zid, enable)

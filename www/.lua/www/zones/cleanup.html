@@ -1,0 +1,107 @@
+<?lsp
+local sensitive=require"SensitiveAction"
+local csrf=sensitive.csrf(request:session())
+local maxDate=os.date("!%Y-%m-%d",os.time()-24*60*60)
+?>
+<section class="content">
+  <div class="card card-danger cleanup-card">
+    <div class="card-header">
+      <h3 class="card-title">Remove devices that are no longer in use</h3>
+    </div>
+    <div class="card-body">
+      <p>Choose a date to find devices that last accessed this zone before the start of that date. Devices with an active reverse connection are excluded.</p>
+      <form id="cleanupPreviewForm" novalidate>
+        <div class="form-group cleanup-date-field">
+          <label for="cleanupCutoff">Last accessed before</label>
+          <input id="cleanupCutoff" class="form-control" type="date" max="<?lsp=maxDate?>" required>
+        </div>
+        <button class="btn btn-primary" type="submit">Preview inactive devices</button>
+      </form>
+
+      <div id="cleanupResult" class="cleanup-result" hidden>
+        <div id="cleanupSummary" class="alert alert-info" role="status"></div>
+        <div class="cleanup-table-wrap">
+          <table class="table table-striped table-bordered">
+            <thead><tr><th>Device</th><th>Last access</th></tr></thead>
+            <tbody id="cleanupRows"></tbody>
+          </table>
+        </div>
+        <div id="cleanupConfirm" class="cleanup-confirm" hidden>
+          <label><input id="cleanupAcknowledge" type="checkbox"> I understand that this permanently removes all devices listed above.</label>
+          <p>Devices that access the portal after this preview will be retained.</p>
+          <button id="cleanupRemove" class="btn btn-danger" type="button" disabled>Remove listed devices</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+$(function() {
+  const csrf=<?lsp response:write(string.format("%q",csrf)) ?>;
+  const form=document.getElementById('cleanupPreviewForm');
+  const result=document.getElementById('cleanupResult');
+  const summary=document.getElementById('cleanupSummary');
+  const rows=document.getElementById('cleanupRows');
+  const confirmBox=document.getElementById('cleanupConfirm');
+  const acknowledge=document.getElementById('cleanupAcknowledge');
+  const removeButton=document.getElementById('cleanupRemove');
+  let previewId=null;
+
+  function showError(message) {
+    portalToast.error(message || 'The operation failed.');
+  }
+  function request(action,data) {
+    return $.ajax({
+      url:'/device-cleanup-action.html', type:'POST', dataType:'json',
+      data:Object.assign({action:action,csrf:csrf},data || {})
+    });
+  }
+  function clearPreview() {
+    previewId=null;
+    acknowledge.checked=false;
+    removeButton.disabled=true;
+    confirmBox.hidden=true;
+    rows.replaceChildren();
+  }
+  form.addEventListener('submit',function(event) {
+    event.preventDefault();
+    clearPreview();
+    request('preview',{date:document.getElementById('cleanupCutoff').value})
+      .done(function(response) {
+        previewId=response.previewId;
+        result.hidden=false;
+        summary.textContent=response.count === 1 ?
+          '1 inactive device was found.' : response.count+' inactive devices were found.';
+        response.devices.forEach(function(device) {
+          const row=document.createElement('tr');
+          const name=document.createElement('td');
+          const accessed=document.createElement('td');
+          name.textContent=device.name;
+          const parsed=new Date(device.accessTime);
+          accessed.textContent=Number.isNaN(parsed.getTime()) ? device.accessTime : parsed.toLocaleString();
+          row.append(name,accessed);
+          rows.append(row);
+        });
+        confirmBox.hidden=response.count === 0;
+      })
+      .fail(function(xhr) { result.hidden=true; showError(xhr.responseJSON && xhr.responseJSON.error); });
+  });
+  acknowledge.addEventListener('change',function() {
+    removeButton.disabled=!acknowledge.checked || !previewId;
+  });
+  removeButton.addEventListener('click',function() {
+    if(!previewId || !acknowledge.checked) return;
+    removeButton.disabled=true;
+    request('remove',{previewId:previewId})
+      .done(function(response) {
+        clearPreview();
+        result.hidden=false;
+        summary.textContent=response.removed === 1 ?
+          '1 inactive device was removed.' : response.removed+' inactive devices were removed.';
+        if(response.warning) portalToast.warning(response.warning);
+        else portalToast.success(summary.textContent);
+      })
+      .fail(function(xhr) { clearPreview(); showError(xhr.responseJSON && xhr.responseJSON.error); });
+  });
+});
+</script>

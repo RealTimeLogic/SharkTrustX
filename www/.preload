@@ -434,8 +434,22 @@ local function deleteZone(zname)
    end)
 end
 
-local function deleteDevice(zoneT, dkey)
-   db.removeDevice(dkey, function() bindUpdateZone(zoneT) end)
+local function deleteDevice(zoneT, dkey, func)
+   db.removeDevice(dkey, function(ok,err)
+      local bindOk=true
+      if ok then bindOk,err=pcall(bindUpdateZone,zoneT) end
+      if not bindOk then log(true,"Device DNS refresh failed for zone %s",zoneT.zname) end
+      if func then func(ok,err,bindOk) end
+   end)
+end
+
+local function deleteInactiveDevices(zoneT,cutoff,eligible,func)
+   db.removeInactiveDevices(zoneT.zid,cutoff,eligible,function(ok,result)
+      local bindOk,bindErr=true
+      if ok then bindOk,bindErr=pcall(bindUpdateZone,zoneT) end
+      if not bindOk then log(true,"Inactive-device DNS refresh failed for zone %s",zoneT.zname) end
+      if func then func(ok,result,bindOk,bindErr) end
+   end)
 end
 
 local sharkTrust=require"SharkTrust".init{
@@ -735,12 +749,11 @@ local function delayedLoad()
    end
    log(false, "Ready %s", os.date())
 end
-ba.thread.run(delayedLoad)
-
 -- Export:
 app.ha1=ha1
 app.createZone = createZone
 app.deleteDevice=deleteDevice
+app.deleteInactiveDevices=deleteInactiveDevices
 app.deleteZone = deleteZone
 app.peername = peername
 app.settingsT = settingsT
@@ -899,10 +912,16 @@ do -- SSO zone cache
          local function savecredential(secret,metadata)
             ssoCfgT.client_secret=secret
             ssoCfgT.client_secret_expires=metadata.expires
-            local saved
-            db.setSsoCfg(zoneT.zid,ssoCfgT,function() saved=true end)
+            local completed,saved
+            db.setSsoCfg(zoneT.zid,ssoCfgT,function(ok)
+               completed=true
+               saved=ok
+            end)
             for _=1,100 do
-               if saved then return true end
+               if completed then
+                  if saved then return true end
+                  return nil,"Database write failed"
+               end
                ba.sleep(50)
             end
             return nil,"Database busy; the credential was not saved"
@@ -911,19 +930,42 @@ do -- SSO zone cache
                               {log=ssolog,notify=notify,savecredential=savecredential})
          if not ok then return nil,value end
          sso=value
-         if changed then db.setSsoCfg(zoneT.zid,ssoCfgT) end
+         if changed then
+            local completed,saved
+            db.setSsoCfg(zoneT.zid,ssoCfgT,function(ok)
+               completed=true
+               saved=ok
+            end)
+            for _=1,200 do
+               if completed then break end
+               ba.sleep(50)
+            end
+            if not saved then
+               return nil,"Database busy; the updated SSO configuration was not saved"
+            end
+         end
          ssoT[host]=sso
       end
       return sso
    end
 
+   -- Close the zone iterator before initializing SSO. SSO initialization may
+   -- queue a database write when bringing an older configuration up to date.
+   -- Keeping the iterator's read cursor open would prevent that write from
+   -- committing and can starve the startup thread.
+   local ssoZones={}
    for zid,zname in db.getZonesT() do
-      if db.getSsoEnabled(zid) then
-         local _,err=app.sso(zname)
-         if err then log(true,"Cannot initialize SSO for %s: %s",zname,err) end
-      end
+      if db.getSsoEnabled(zid) then ssoZones[#ssoZones+1]=zname end
+   end
+   for _,zname in ipairs(ssoZones) do
+      local _,err=app.sso(zname)
+      if err then log(true,"Cannot initialize SSO for %s: %s",zname,err) end
    end
 end
+
+-- Database-backed startup upgrades above must finish before BIND and
+-- certificate initialization enumerate the same zones.
+ba.thread.run(delayedLoad)
 
 end) -- End: Entire file wrapped in a function
 

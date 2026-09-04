@@ -1,0 +1,122 @@
+<?lsp
+local sensitive=require"SensitiveAction"
+local session=request:session()
+
+local function sendJson(status,body,extraHeaders)
+   local encoded=ba.json.encode(body)
+   response:setstatus(status)
+   response:setheader("Cache-Control","no-store")
+   response:setheader("Pragma","no-cache")
+   response:setheader("Referrer-Policy","no-referrer")
+   if extraHeaders then
+      for name,value in pairs(extraHeaders) do response:setheader(name,value) end
+   end
+   response:setcontenttype("application/json; charset=utf-8")
+   response:setcontentlength(#encoded)
+   response:write(encoded)
+end
+
+local function deferredJson(defresp,status,body)
+   if not defresp:valid() then return end
+   local encoded=ba.json.encode(body)
+   defresp:setstatus(status)
+   defresp:setheader("Cache-Control","no-store")
+   defresp:setheader("Pragma","no-cache")
+   defresp:setheader("Referrer-Policy","no-referrer")
+   defresp:setheader("Content-Type","application/json; charset=utf-8")
+   defresp:setcontentlength(#encoded)
+   defresp:send(encoded)
+   defresp:close()
+end
+
+if request:method() ~= "POST" then
+   return sendJson(405,{error="Settings changes require POST."},{Allow="POST"})
+end
+if not request:header"x-requested-with" then
+   return sendJson(400,{error="This settings request is not valid."})
+end
+
+local data=request:data()
+if not sensitive.validCsrf(session,data.csrf) then
+   return sendJson(403,{error="This page has expired. Reload Settings and try again."})
+end
+
+for name,value in pairs(data) do
+   if type(value) == "string" then data[name]=value:gsub("^%s*(.-)%s*$","%1") end
+end
+
+local action=data.action
+local domain=request:domain()
+local actor=userT.name or userT.email or "administrator"
+local zoneName=zoneT.zname
+local peer=request:peername()
+
+local function queueWrite(writer,result,afterCommit)
+   local defresp=response:deferred()
+   writer(function(ok)
+      if not ok then
+         log(true,"Settings database write failed for action %s in zone %s",action,zoneName)
+         return deferredJson(defresp,503,{error="The database write did not complete. Please try again."})
+      end
+      if afterCommit then
+         local callbackOk=pcall(afterCommit)
+         if not callbackOk then
+            log(true,"Settings post-commit action failed for %s in zone %s",action,zoneName)
+         end
+      end
+      log(false,"Updated setting %s for zone %s by %s originating from %s",
+          action,zoneName,actor,peer)
+      deferredJson(defresp,200,result)
+   end)
+end
+
+local function boolean(value)
+   if value == "true" then return true end
+   if value == "false" then return false end
+end
+
+if action == "auto-registration" then
+   local enabled=boolean(data.enabled)
+   if enabled == nil then return sendJson(400,{error="The setting value is invalid."}) end
+   return queueWrite(function(done) db.setAutoReg(zoneT.zid,enabled,done) end,{enabled=enabled})
+elseif action == "sso-enabled" then
+   local enabled=boolean(data.enabled)
+   if enabled == nil then return sendJson(400,{error="The setting value is invalid."}) end
+   if enabled and not db.getSsoCfg(zoneT.zid) then
+      return sendJson(400,{enabled=false,error="SSO Settings must be set before enabling SSO."})
+   end
+   return queueWrite(function(done) db.setSsoEnabled(zoneT.zid,enabled,done) end,
+      {enabled=enabled},function() app.ssoClose(domain) end)
+elseif action == "sso-config" then
+   local decodeOk,cfg=pcall(ba.json.decode,data.config or "")
+   if not decodeOk or type(cfg) ~= "table" then
+      return sendJson(400,{error="Please enter valid Microsoft Entra settings."})
+   end
+   local current=db.getSsoCfg(zoneT.zid) or {}
+   for _,name in ipairs{"tenant","client_id","client_secret","client_secret_expires"} do
+      if type(cfg[name]) ~= "string" then cfg[name]="" end
+      cfg[name]=cfg[name]:gsub("^%s*(.-)%s*$","%1")
+   end
+   if cfg.client_secret == "" then cfg.client_secret=current.client_secret or "" end
+   local origin=request:url():match"^https?://[^/]+"
+   cfg.redirect_uri=origin and origin.."/ms-sso.html"
+   local year,month,day=cfg.client_secret_expires:match"^(%d%d%d%d)%-(%d%d)%-(%d%d)$"
+   local dateOk,expires=pcall(function()
+      return year and ba.datetime(string.format("%s-%s-%sT23:59:59Z",year,month,day))
+   end)
+   if #cfg.tenant <= 5 or #cfg.client_id <= 10 or #cfg.client_secret <= 10 or
+      not cfg.redirect_uri or not dateOk or not expires then
+      return sendJson(400,{error="Please enter valid Microsoft Entra settings."})
+   end
+   return queueWrite(function(done) db.setSsoCfg(zoneT.zid,cfg,done) end,
+      {saved=true},function() app.ssoClose(domain) end)
+elseif action == "reverse-prefix" then
+   local prefix=data.prefix
+   if type(prefix) ~= "string" or #prefix > 63 or prefix:find("%c") then
+      return sendJson(400,{error="The reverse connection prefix is invalid."})
+   end
+   return queueWrite(function(done) db.zoneRname(zoneT.zid,prefix,done) end,{saved=true})
+end
+
+return sendJson(400,{error="The settings action is not supported."})
+?>

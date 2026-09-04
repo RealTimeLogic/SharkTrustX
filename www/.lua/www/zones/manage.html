@@ -1,4 +1,8 @@
-<script> const addRemoveButton=true; </script>
+<?lsp local sensitive=require"SensitiveAction" ?>
+<script>
+const addRemoveButton=true;
+const deviceActionCsrf=<?lsp response:write(string.format("%q",sensitive.csrf(request:session()))) ?>;
+</script>
 <section class="content">
 <div class="card card-primary">
 

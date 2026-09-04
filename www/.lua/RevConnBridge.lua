@@ -210,7 +210,8 @@ ba.timer(terminateIdleDevs):set(60*60*1000,true)
 local function getDevInfo(dkey)
    local deviceT = devicesT[dkey:lower()]
    if deviceT then
-      return deviceT.dz,(next(deviceT.idleSocksT) and true or false),deviceT.lastActiveTime,deviceT.activeCons
+      local active=next(deviceT.idleSocksT) ~= nil or deviceT.activeCons > 0
+      return deviceT.dz,active,deviceT.lastActiveTime,deviceT.activeCons
    end
 end
 

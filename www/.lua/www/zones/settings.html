@@ -1,60 +1,12 @@
 <?lsp
 
-if request:header"x-requested-with" then
-   local enabled,err
-   local data = request:data()
-   local function update(func)
-      local done
-      func(function() done=true end)
-      for _=1,100 do
-         if done then return true end
-         ba.sleep(50)
-      end
-   end
-   -- Trim WS
-   for k,v in pairs(data) do data[k]=v:gsub("^%s*(.-)%s*$", "%1") end
-   if data.autoReg then
-      enabled = data.autoReg == "true"
-      db.setAutoReg(zoneT.zid,enabled)
-   elseif data.sso then
-      enabled = data.sso == "true"
-      if enabled and not db.getSsoCfg(zoneT.zid) then
-         enabled=false
-         err="'SSO Settings' must be set"
-      else
-         if update(function(done) db.setSsoEnabled(zoneT.zid,enabled,done) end) then
-            app.ssoClose(request:domain())
-         else
-            enabled=false
-            err="Database busy; try again"
-         end
-      end
-   elseif data.ssocfg then
-      local cfg = ba.json.decode(data.ssocfg)
-      if cfg then
-         local current=db.getSsoCfg(zoneT.zid) or {}
-         if cfg.client_secret == "" then cfg.client_secret=current.client_secret end
-         local origin=request:url():match"^https?://[^/]+"
-         cfg.redirect_uri=origin and origin.."/ms-sso.html"
-         local y,m,d=(cfg.client_secret_expires or ""):match"^(%d%d%d%d)%-(%d%d)%-(%d%d)$"
-         local expires=y and ba.datetime(string.format("%s-%s-%sT23:59:59Z",y,m,d))
-         if #(cfg.tenant or "") > 5 and #(cfg.client_id or "") > 10 and
-            #(cfg.client_secret or "") > 10 and cfg.redirect_uri and expires then
-            enabled=update(function(done) db.setSsoCfg(zoneT.zid,cfg,done) end)
-            if enabled then
-               app.ssoClose(request:domain())
-            else
-               err="Database busy; try again"
-            end
-         else
-            err="Please enter valid Microsoft Entra settings"
-         end
-      end
-   elseif data.rname then
-      db.zoneRname(zoneT.zid,data.rname)
-   end
-   response:json{enabled=enabled,err=err}
-end
+response:setheader("Cache-Control","no-store")
+response:setheader("Pragma","no-cache")
+response:setheader("Referrer-Policy","no-referrer")
+
+local sensitive=require"SensitiveAction"
+local session=request:session()
+local csrfToken=sensitive.csrf(session)
 
 local ssoCfgT=db.getSsoCfg(zoneT.zid) or {
    tenant="",
@@ -64,6 +16,8 @@ local ssoCfgT=db.getSsoCfg(zoneT.zid) or {
 }
 local redirectUri=(request:url():match"^https?://[^/]+" or "").."/ms-sso.html"
 local hasSecret=#(ssoCfgT.client_secret or "") > 0
+
+local showSecret=sensitive.consume(session,"secret")
 
 local rname=db.zoneRname(zoneT.zid)
 
@@ -77,13 +31,13 @@ local rname=db.zoneRname(zoneT.zid)
    <tr>
      <td><span>Auto Registration:</span></td>
      <td>
-       <input data-toggle="tooltip" title="Enable automatic account registration without requiring administrator acceptance" type="checkbox" id="autoReg" name="autoReg" <?lsp=zoneT.autoReg and "checked" or ""?>>
+       <input title="Enable automatic account registration without requiring administrator acceptance" type="checkbox" id="autoReg" name="autoReg" <?lsp=zoneT.autoReg and "checked" or ""?>>
      </td>
    </tr>
    <tr>
      <td><span>SSO:</span></td>
      <td>
-       <input data-toggle="tooltip" title="Enable or disable Microsoft Single Sign On (SSO)" type="checkbox" id="sso" name="sso" <?lsp=zoneT.sso and "checked" or ""?>>
+       <input title="Enable or disable Microsoft Single Sign On (SSO)" type="checkbox" id="sso" name="sso" <?lsp=zoneT.sso and "checked" or ""?>>
      </td>
    </tr>
    <tr>
@@ -130,15 +84,20 @@ local rname=db.zoneRname(zoneT.zid)
    <tr><td>Zone Key:</td><td><?lsp=zoneT.zkey?></td></tr>
    <tr><td>Secret:</td><td>
 <?lsp
- local session = request:session() 
- if session.verification and session.verification == request:data"verification" then
+ if showSecret then
     print(zoneT.zsecret)
-    session.verification=nil
  else
-   print'<a href="verification.html">View secret</a>'
+   print'<a href="verification.html?purpose=secret">View secret</a>'
  end
 ?>
    </td></tr>
+   <tr>
+     <td>C client module:</td>
+     <td>
+       <a href="cgen.html">Download tokengen.c</a>
+       <small class="sensitive-note">Generates zone-specific client code. The downloaded file contains protected zone credentials and must be stored securely.</small>
+     </td>
+   </tr>
    </table>
 </div>
 </div>
@@ -146,37 +105,51 @@ local rname=db.zoneRname(zoneT.zid)
 <script>
 $(function() {
 
+    const csrfToken="<?lsp=csrfToken?>";
+
     function etoast(msg) {
-        $(document).Toasts('create', {
-            class: 'bg-danger',
-            title: 'Failed:',
-            body: msg
-        });
+        portalToast.error(msg);
     };
 
-    $("#autoReg").click(function() {
-        const autoReg=$(this).prop("checked");
-        $.getJSON(window.location,{autoReg:autoReg}, function() {
-            if(autoReg)
-                toastr.success("Auto Registration Enabled");
-            else
-                toastr.warning("Auto Registration Disabled");
+    function errorMessage(xhr,fallback) {
+        return xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : fallback;
+    }
+
+    function saveSetting(action,data) {
+        return $.ajax({
+            url:"settings-action.html",
+            type:"POST",
+            dataType:"json",
+            data:Object.assign({action:action,csrf:csrfToken},data || {})
         });
+    }
+
+    $("#autoReg").click(function() {
+        const self=$(this),autoReg=self.prop("checked");
+        self.prop("disabled",true);
+        saveSetting("auto-registration",{enabled:autoReg}).done(function() {
+            if(autoReg)
+                portalToast.success("Auto Registration Enabled");
+            else
+                portalToast.warning("Auto Registration Disabled");
+        }).fail(function(xhr){
+            self.prop("checked",!autoReg);
+            etoast(errorMessage(xhr,"Cannot save Auto Registration"));
+        }).always(function(){self.prop("disabled",false)});
     });
     $("#sso").click(function() {
         let self=$(this);
         const sso=self.prop("checked");
         self.prop("disabled",true);
-        $.getJSON(window.location,{sso:sso},function(rsp){
+        saveSetting("sso-enabled",{enabled:sso}).done(function(rsp){
             self.prop("checked", rsp.enabled);
-            if(rsp.err)
-                etoast(rsp.err);
-            else {
-                if(sso)
-                    toastr.success("Single Sign On Enabled");
-                else
-                    toastr.warning("Single Sign On Disabled");
-            }
+            if(sso)
+                portalToast.success("Single Sign On Enabled");
+            else
+                portalToast.warning("Single Sign On Disabled");
+        }).fail(function(xhr){
+            self.prop("checked",!sso);
+            etoast(errorMessage(xhr,"Cannot save Single Sign On setting"));
         }).always(function(){self.prop("disabled",false)});
     });
     $("#ssobut").click(function() {
@@ -192,15 +165,10 @@ $(function() {
            cfg.client_secret_expires.length)
         {
             button.prop("disabled",true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving');
-            $.ajax({url:window.location,type:"POST",dataType:"json",
-                    data:{ssocfg:JSON.stringify(cfg)}}).done(function(rsp){
-                if(rsp.err)
-                    etoast(rsp.err);
-                 else {
-                    $("#client_secret").val("");
-                    toastr.success("Single Sign On Settings Saved");
-                 }
-            }).fail(function(){etoast("Cannot save Single Sign On settings")})
+            saveSetting("sso-config",{config:JSON.stringify(cfg)}).done(function(){
+                $("#client_secret").val("");
+                portalToast.success("Single Sign On Settings Saved");
+            }).fail(function(xhr){etoast(errorMessage(xhr,"Cannot save Single Sign On settings"))})
               .always(function(){button.prop("disabled",false).html(label)});
         }
         else
@@ -208,13 +176,13 @@ $(function() {
     });
 
     $("#rnamebut").click(function() {
-        let rname=$("#rname").val()
-        $.getJSON(window.location,{rname:rname},function(rsp){
-            if(rsp.err)
-                etoast(rsp.err);
-            else
-               toastr.success("Reverse Connection Prefix "+(rname.length==0 ? "Removed!" : "Saved!"));
-        });
+        let button=$(this),rname=$("#rname").val();
+        button.prop("disabled",true);
+        saveSetting("reverse-prefix",{prefix:rname}).done(function(){
+            portalToast.success("Reverse Connection Prefix "+(rname.length==0 ? "Removed!" : "Saved!"));
+        }).fail(function(xhr){
+            etoast(errorMessage(xhr,"Cannot save Reverse Connection Prefix"));
+        }).always(function(){button.prop("disabled",false)});
     });
 
 

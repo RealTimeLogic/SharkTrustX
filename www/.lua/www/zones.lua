@@ -73,6 +73,11 @@ local function cmsfunc(_ENV,relpath,zname)
    _ENV.userT=userT
    _ENV.lspPage=parseLspPage(".lua/www/zones/"..relpath)
 
+   if m.raw then
+      _ENV.lspPage(_ENV,relpath,io,pageT,app)
+      return true
+   end
+
    --Enable when working on template.lsp
    --local _,templatePage=io:dofile(".lua/www/engine.lua",app)
 

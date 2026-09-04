@@ -49,9 +49,9 @@ local function listAllUsers()
         self.parent().parent().children(":first").html(html);
         $.getJSON(window.location,{uid:self.attr("uid"),poweruser:poweruser}, function() {
             if(poweruser)
-                toastr.success("Power user access granted");
+                portalToast.success("Power user access granted");
             else
-                toastr.warning("Power user access removed");
+                portalToast.warning("Power user access removed");
         });
     });
 </script>
@@ -91,9 +91,9 @@ local function manageUser(email)
         let access=self.prop("checked");
         $.getJSON(window.location,{uid:<?lsp=userT.uid?>,did:self.attr("name"),access:access},function(){
             if(access)
-                toastr.success("Access granted");
+                portalToast.success("Access granted");
             else
-                toastr.warning("Access removed");
+                portalToast.warning("Access removed");
         });
     });
 </script>

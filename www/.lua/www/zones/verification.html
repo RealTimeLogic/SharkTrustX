@@ -1,55 +1,94 @@
 <?lsp
+local sensitive=require"SensitiveAction"
 local data=request:data()
-local session = request:session()
+local session=request:session()
+local purposeName=data.purpose
+local purpose=sensitive.purpose(purposeName)
+
+response:setheader("Cache-Control","no-store")
+response:setheader("Pragma","no-cache")
+response:setheader("Referrer-Policy","no-referrer")
+
+if not purpose then return response:sendredirect"settings.html" end
+
+local csrfToken=sensitive.csrf(session)
+local err
 if request:method() == "POST" then
-   if not session.referrer then response:sendredirect"/" end
-   local ver = data.verification or ""
-   response:sendredirect(session.referrer.."?verification="..ver)
+   if not sensitive.validCsrf(session,data.csrf) then
+      err="This page has expired. Reload it and request a new code."
+   else
+      local verified,reason=sensitive.verify(session,purposeName,data.verification)
+      if verified then
+         log(false,"Verified request to %s for zone %s by %s originating from %s",
+             verified.description,zoneT.zname,userT.name or "administrator",request:peername())
+         return response:sendredirect(verified.path)
+      elseif reason == "invalid" then
+         err="The verification code is invalid. Please try again."
+      else
+         err="This verification request is no longer available. Request a new code."
+      end
+   end
+elseif request:method() ~= "GET" then
+   response:setheader("Allow","GET, POST")
+   response:setstatus(405)
+   err="Use this page to request and enter a verification code."
 end
-session.referrer=data.ref or request:header"referer"
-if not session.referrer then response:sendredirect"/" end
-local fmt,sbyte=string.format,string.byte
-session.verification = ba.rndbs(6):gsub(".",function(x) return fmt("%02X",sbyte(x)) end)
-if not session.verification then response:sendredirect"/" end
-local zname=request:header"host"
 
-local ebody=[[
-You have requested a secure verification code to view secrets.
-
-Please enter this secure verification code: %s
-
-Reset your password and review your security settings if you did not request viewing secrets:
-https://%s/login.html
-]]
-
-local peername=request:peername()
-local function sendEmail()
-   local send = require"log".sendmail
-   send{
-      subject="Secure two-step verification notification for "..zname,
-      to=zoneT.admEmail,
-      body=fmt(ebody, session.verification, zname)
-   }
-   log(false,"Requesting viewing secrets for %s originating from %s",zname,peername) 
-end
-ba.thread.run(sendEmail) 
+local hasChallenge=sensitive.hasChallenge(session,purposeName)
 ?>
 
 <section class="content">
 <div class="card card-primary">
 <div class="card-body">
-  <form id="verification" method="post">
+  <div id="verificationError" class="alert alert-danger<?lsp=err and '' or ' is-hidden'?>" role="alert"><?lsp=err or ''?></div>
+  <p>To <?lsp=purpose.description?>, send a verification code to the zone owner's email address. Opening or refreshing this page does not send email.</p>
+  <button id="sendVerification" type="button" class="btn btn-primary"><?lsp=hasChallenge and 'Resend verification code' or 'Send verification code'?></button>
+  <p id="verificationStatus" class="verification-status<?lsp=hasChallenge and '' or ' is-hidden'?>"><?lsp=hasChallenge and 'A verification request is active. Enter the current code, or request a resend when available.' or ''?></p>
+  <form id="verification" method="post" class="<?lsp=hasChallenge and '' or 'is-hidden'?>">
+    <input type="hidden" name="purpose" value="<?lsp=purposeName?>"/>
+    <input type="hidden" name="csrf" value="<?lsp=csrfToken?>"/>
     <div class="form-group">
-      <p>A verification code has been sent to your email address. Please enter the code that you received.</p>
-      <input type="text" name="verification" class="form-control" placeholder="Verification code" autofocus required tabindex="1"/>
+      <label for="verificationCode">Verification code</label>
+      <input id="verificationCode" type="text" name="verification" class="form-control" placeholder="12-character verification code" inputmode="text" autocomplete="one-time-code" minlength="12" maxlength="12" pattern="[0-9A-Fa-f]{12}" required tabindex="1"/>
     </div>
-    <input type="submit" class="btn btn-block btn-primary" value="Enter" tabindex="2"/>
+    <input type="submit" class="btn btn-primary" value="Verify and continue" tabindex="2"/>
   </form>
 </div>
 </div>
 </section>
 <script>
-$("#verification").submit(function() {
-setTimeout("window.location.href='/'", 3000)
+$(function(){
+    const purpose="<?lsp=purposeName?>",csrfToken="<?lsp=csrfToken?>";
+    const button=$("#sendVerification"),form=$("#verification");
+    const status=$("#verificationStatus"),error=$("#verificationError");
+
+    function showError(message) {
+        error.text(message).removeClass("is-hidden");
+        portalToast.error(message);
+    }
+
+    button.click(function(){
+        const label=button.text();
+        button.prop("disabled",true).text("Sending...");
+        error.addClass("is-hidden").text("");
+        $.ajax({
+            url:"verification-start.html",
+            type:"POST",
+            dataType:"json",
+            data:{purpose:purpose,csrf:csrfToken}
+        }).done(function(){
+            status.text("The verification email was sent. The code expires in 10 minutes.").removeClass("is-hidden");
+            form.removeClass("is-hidden");
+            $("#verificationCode").trigger("focus");
+            button.text("Resend verification code");
+            portalToast.success("Verification email sent");
+        }).fail(function(xhr){
+            const message=xhr.responseJSON && xhr.responseJSON.error ? xhr.responseJSON.error : "The verification email could not be sent. Please try again.";
+            showError(message);
+            button.text(label);
+        }).always(function(){
+            button.prop("disabled",false);
+        });
+    });
 });
 </script>

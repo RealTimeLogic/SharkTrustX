@@ -55,7 +55,7 @@ new Microsoft sign-in before it is saved for the zone.
 ## Customizing SharkTrustX
 
 1. Fork or clone this repository.
-2. Customize the template with your own logos and color options. The [template page](www/.lua/www/template.lsp) is based on the  AdminLTE Bootstrap template. See the Mako Server tutorial [How to Build an Interactive Dashboard App](https://makoserver.net/articles/How-to-Build-an-Interactive-Dashboard-App) for details.
+2. Customize the framework-free light dashboard in [the shared template](www/.lua/www/template.lsp) and [its stylesheet](www/assets/style.css). The responsive shell is based on the custom variant in the [Light Dashboard example](https://github.com/RealTimeLogic/LSP-Examples/tree/master/Light-Dashboard). All theme colors, sizing, radii, and navigation width are CSS custom properties in the documented `:root` block at the top of the stylesheet, so branding changes do not require editing component rules. The default palette follows Real Time Logic's restrained technical theme: dark neutral surfaces, green primary actions, and yellow links. See the Mako Server tutorial [How to Build an Interactive Dashboard App](https://makoserver.net/articles/How-to-Build-an-Interactive-Dashboard-App) for details.
 
 
 ## Installation Instructions

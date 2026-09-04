@@ -1,156 +1,115 @@
 <?lsp
 local response=response
-local parentRefT=parentRefT
 local relpath=relpath
-local emptyT={}
-local parentsT = parentRefT[relpath]
+local parentsT = parentRefT[relpath] or {}
 
 local canAccess = userT and userT.canAccess or function(userType) return not userType end
 
-local function emitMenu(menuL)
+local function emitMenu(menuL,nested)
    for _,m in ipairs(menuL) do
-      if m.class and canAccess(m.user) then
-         response:write('<li class="nav-item', parentsT[m.sub] and  ' menu-open' or '','"><a href="/',m.href,
-                        '" class="nav-link',m.href == relpath and ' active' or '','"><i class="',m.class,'"></i><p>',m.name)
+      if m.menu and canAccess(m.user) then
+         local active = m.href == relpath
          if m.sub then
-            response:write('<i class="right fas fa-angle-left"></i></p></a><ul class="nav nav-treeview">')
-            emitMenu(m.sub)
+            local groupActive = parentsT[m.sub] and true or false
+            response:write('<li class="nav-item nav-group',groupActive and ' is-active' or '', '">')
+            if m.href then
+               response:write('<a href="/',m.href,'" class="nav-group-title',active and ' is-active' or '', '"',active and ' aria-current="page"' or '', '>',m.name,'</a>')
+            else
+               response:write('<span class="nav-group-title">',m.name,'</span>')
+            end
+            response:write('<ul class="nav-sublist">')
+            emitMenu(m.sub,true)
             response:write('</ul></li>')
          else
-            response:write('</p></a></li>')
+            response:write('<li class="nav-item"><a href="/',m.href,'" class="',nested and 'nav-sublink' or 'nav-link',active and ' is-active' or '', '"',active and ' aria-current="page"' or '', '>',m.name,'</a></li>')
          end
       end
    end
 end
 
-
+local function emitBreadcrumbs()
+   local breadcrumbL = breadcrumbT[relpath]
+   if breadcrumbL then
+      for _,bc in ipairs(breadcrumbL) do
+         if bc.href then
+            response:write('<a href="',bc.href,'">',bc.name,'</a><span aria-hidden="true">/</span>')
+         else
+            response:write('<span>',bc.name,'</span><span aria-hidden="true">/</span>')
+         end
+      end
+   end
+   if activeMenuItem.name then
+      response:write('<span aria-current="page">',activeMenuItem.name,'</span>')
+   end
+end
 ?>
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SharkTrustX</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,400i,700&display=fallback">
-  <link rel="stylesheet" href="/plugins/fontawesome-free/css/all.min.css">
-  <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
-  <link rel="stylesheet" href="/plugins/icheck-bootstrap/icheck-bootstrap.min.css">
-  <link rel="stylesheet" href="/dist/css/adminlte.min.css">
-  <link rel="stylesheet" href="../../plugins/toastr/toastr.min.css">
+  <title><?lsp=activeMenuItem.name and activeMenuItem.name.." | SharkTrustX" or "SharkTrustX"?></title>
+  <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/assets/style.css">
   <script src="/rtl/jquery.js"></script>
 </head>
-<body class="hold-transition sidebar-mini layout-fixed">
-<div class="wrapper">
-  <!-- Navbar -->
-  <nav class="main-header navbar navbar-expand navbar-white navbar-light">
-    <!-- Left navbar links -->
-    <ul class="navbar-nav">
-      <li class="nav-item">
-        <a class="nav-link" data-widget="pushmenu" href="#" role="button"><i class="fas fa-bars"></i></a>
-      </li>
-    </ul>
+<body>
+<div id="layout" class="app-shell">
+  <button id="menuLink" class="menu-link" type="button" aria-label="Toggle navigation" aria-controls="menu" aria-expanded="false">
+    <span></span>
+  </button>
 
-   <ul class="navbar-nav ml-auto">
-<?lsp if userT then ?>
-      <li class="nav-item d-sm-inline-block">
-        <span class="nav-link"><?lsp=userT.name or userT.email?></span>
-      </li>
-      <li class="nav-item d-sm-inline-block">
-        <a href="/logout.lsp" class="nav-link">Logout</a>
-      </li>
-<?lsp else ?>
-      <li class="nav-item d-sm-inline-block">
-        <a href="/login.html" class="nav-link">Login</a>
-      </li>
-<?lsp end ?>
-    </ul>
-
-  </nav>
-  <!-- /.navbar -->
-
-  <!-- Main Sidebar Container -->
-  <aside class="main-sidebar sidebar-dark-primary elevation-4">
-    <!-- Brand Logo -->
-    <a href="https://realtimelogic.com/products/SharkTrustX/" class="brand-link">
-      <img src="/dist/img/SharkTrustLogo.png" alt="SharkTrustX Logo" class="brand-image img-circle elevation-3" style="opacity: .8">
-      <span class="brand-text font-weight-light">SharkTrustX</span>
-    </a>
-
-    <!-- Sidebar -->
-    <div class="sidebar">
-      <!-- Sidebar Menu -->
-      <nav class="mt-2">
-        <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
-          <!-- Add icons to the links using the .nav-icon class
-               with font-awesome or any other icon font library -->
-
-<?lsp emitMenu(menuL) ?>
-
+  <aside id="menu" class="side-nav" aria-label="Primary navigation">
+    <div class="nav-inner">
+      <a class="nav-brand" href="https://realtimelogic.com/products/SharkTrustX/">
+        <span class="brand-mark" aria-hidden="true">X</span>
+        <span class="brand-copy"><strong>SharkTrustX</strong><small>Trust services portal</small></span>
+      </a>
+      <nav>
+        <ul class="nav-list">
+          <?lsp emitMenu(menuL,false) ?>
         </ul>
       </nav>
-      <!-- /.sidebar-menu -->
+      <div class="nav-account">
+<?lsp if userT then ?>
+        <span class="account-name"><?lsp=userT.name or userT.email?></span>
+        <a href="/logout.lsp">Sign out</a>
+<?lsp else ?>
+        <span class="account-name">Guest access</span>
+        <a href="/login.html">Sign in</a>
+<?lsp end ?>
+      </div>
     </div>
-    <!-- /.sidebar -->
   </aside>
 
-  <!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <div class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <?lsp if activeMenuItem.name then response:write('<h1 class="m-0">',activeMenuItem.name,'</h1>') end ?>
-          </div><!-- /.col -->
-          <div class="col-sm-6">
-           <ol class="breadcrumb float-sm-right">
-           <li class="breadcrumb-item"><a href="/">Home</a></li>
-<?lsp
-local breadcrumbL = breadcrumbT[relpath]
-if breadcrumbL then
-   for _,bc in ipairs(breadcrumbL) do
-      if bc.href then
-         response:write('<li class="breadcrumb-item"><a href="',bc.href,'">',bc.name,'</a></li>')
-      else
-         response:write('<li class="breadcrumb-item">',bc.name,'</li>')
-      end
-   end
-end
-response:write('<li class="breadcrumb-item active">',activeMenuItem.name,'</li>')
-?>
-            </ol>
-          </div><!-- /.col -->
-        </div><!-- /.row -->
-      </div><!-- /.container-fluid -->
-    </div>
-    <!-- /.content-header -->
+  <main id="main" class="main-pane">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">SharkTrustX portal</p>
+        <?lsp if activeMenuItem.name then response:write('<h1>',activeMenuItem.name,'</h1>') else response:write('<h1>SharkTrustX</h1>') end ?>
+      </div>
+      <div class="page-meta">
+        <nav class="breadcrumbs" aria-label="Breadcrumb">
+          <a href="/">Home</a>
+          <?lsp if activeMenuItem.name and activeMenuItem.href ~= "index.html" then response:write('<span aria-hidden="true">/</span>'); emitBreadcrumbs() end ?>
+        </nav>
+<?lsp if userT then ?>
+        <span class="page-user"><?lsp=userT.name or userT.email?></span>
+<?lsp end ?>
+      </div>
+    </header>
 
     <?lsp lspPage(_ENV,relpath,io,page,app) ?>
 
-    <!-- Main content -->
-    <!-- /.content -->
-  </div>
-  <!-- /.content-wrapper -->
-  <footer class="main-footer">
-    <strong>Copyright &copy; <a href="https://realtimelogic.com/">Real Time Logic</a>.</strong>
-    All rights reserved.
-    <div class="float-right d-none d-sm-inline-block">
-
-    </div>
-  </footer>
-
-  <!-- Control Sidebar -->
-  <aside class="control-sidebar control-sidebar-dark">
-    <!-- Control sidebar content goes here -->
-  </aside>
-  <!-- /.control-sidebar -->
+    <footer class="site-footer">
+      <span>&copy; Real Time Logic</span>
+      <a href="https://realtimelogic.com/">realtimelogic.com</a>
+    </footer>
+  </main>
 </div>
-<!-- ./wrapper -->
 
-<script src="/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="/plugins/toastr/toastr.min.js"></script>
-<script src="/dist/js/adminlte.min.js"></script>
+<div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+<script src="/assets/dashboard.js"></script>
 <script src="/assets/service.js"></script>
 </body>
 </html>

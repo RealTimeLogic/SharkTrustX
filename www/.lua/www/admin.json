@@ -2,7 +2,7 @@
     {
         "href" : "index.html",
         "name" : "Register",
-        "class": "nav-icon fas fa-address-card"
+        "menu" : true
     },
     {
         "href" : "404.html",
@@ -18,7 +18,7 @@
     {
         "href" : "manage.html",
         "name" : "Manage Zones",
-        "class": "nav-icon fas fa-tasks",
+        "menu" : true,
         "user" : "root"
     },
     {
@@ -29,7 +29,7 @@
     {
         "href" : "email.html",
         "name" : "E-Mail",
-        "class": "nav-icon fas fa-envelope",
+        "menu" : true,
         "user" : "root"
     }
 ]

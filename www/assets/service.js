@@ -55,11 +55,7 @@ const rembut=
 
 $(function() {
   function etoast(msg) {
-    $(document).Toasts('create', {
-      class: 'bg-danger',
-      title: 'Failed:',
-      body: msg
-    });
+    portalToast.error(msg);
   };
   function insertRname(set,name) {
     if(set)
@@ -72,7 +68,7 @@ $(function() {
     let lastIndex=-1;
     $(".devtab > tr").each(function(index) {
         const trE=$(this);
-        let name=$(".name", this).html()
+        let name=$(".name", this).text()
         let up=false;
         $(".info", this).click(function() {
             const arrowE=$("div",this);
@@ -118,29 +114,37 @@ $(function() {
                 }
                 if(setrname) {
                   trE.next().find('button[data-action="save"]').click(function() {
-                    $.getJSON("rpc/setrname.lsp", {dname:name,rname:$(this).prev("input").val()},
-                       function(rsp) {
+                    $.ajax({url:"rpc/setrname.lsp",type:"POST",dataType:"json",
+                      data:{dname:name,rname:$(this).prev("input").val(),csrf:deviceActionCsrf}})
+                       .done(function(rsp) {
                          if(rsp.ok) {
                            arrowE.removeClass("uarrow").addClass("darrow");
                            $("#details").remove();
                          }
                          else
                            etoast(rsp.err ? rsp.err : "Operation failed");
+                       }).fail(function(xhr) {
+                         etoast(xhr.responseJSON && xhr.responseJSON.err ? xhr.responseJSON.err : "Operation failed");
                        });
                   });
                 }
                 if(rsp.canrem) {
                     trE.next().find('button[data-action="remove"]').click(function() {
-                        $.getJSON("rpc/deletedevice.lsp", {name:name},
-                          function(rsp) {
+                        if(!window.confirm('Permanently remove device "'+name+'"?')) return;
+                        $.ajax({url:"rpc/deletedevice.lsp",type:"POST",dataType:"json",
+                          data:{name:name,csrf:deviceActionCsrf}})
+                          .done(function(rsp) {
                             if(rsp.ok) {
                                 $("#details").remove();
                                 lastErrowE=null;
                                 trE.remove();
+                                if(rsp.warning) portalToast.warning(rsp.warning);
                             }
                             else
                               etoast(rsp.err ? rsp.err : "Operation failed");
-                        });
+                          }).fail(function(xhr) {
+                            etoast(xhr.responseJSON && xhr.responseJSON.err ? xhr.responseJSON.err : "Operation failed");
+                          });
                     });
                 }
                 up=true;
@@ -148,6 +152,4 @@ $(function() {
             });
         })
     });
-    $('[data-toggle="tooltip"]').tooltip();
 });
-

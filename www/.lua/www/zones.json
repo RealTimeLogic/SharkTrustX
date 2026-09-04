@@ -2,24 +2,30 @@
     {
         "href" : "index.html",
         "name" : "Available Devices",
-        "class": "nav-icon fas fa-hdd",
+        "menu" : true,
     },
     {
         "href" : "manage.html",
         "name" : "Manage Devices",
-        "class": "nav-icon fas fa-tasks",
+        "menu" : true,
         "user" : "power"
+    },
+    {
+        "href" : "cleanup.html",
+        "name" : "Remove Inactive Devices",
+        "menu" : true,
+        "user" : "admin"
     },
     {
         "href" : "users.html",
         "name" : "Manage Users",
-        "class": "nav-icon fas fa-users-cog",
+        "menu" : true,
         "user" : "admin"
     },
     {
         "href" : "settings.html",
         "name" : "Settings",
-        "class": "nav-icon fas fa-cogs",
+        "menu" : true,
         "user" : "admin"
     },
     {
@@ -39,6 +45,21 @@
         "user" : "admin"
     },
     {
+        "href" : "verification-start.html",
+        "user" : "admin",
+        "raw" : true
+    },
+    {
+        "href" : "settings-action.html",
+        "user" : "admin",
+        "raw" : true
+    },
+    {
+        "href" : "device-cleanup-action.html",
+        "user" : "admin",
+        "raw" : true
+    },
+    {
         "href" : "cgen.html",
         "name" : "Generate C Code",
         "user" : "admin"
@@ -53,7 +74,4 @@
         "href" : "ms-sso.html"
     }
 ]
-
-
-
 

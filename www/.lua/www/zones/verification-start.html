@@ -1,0 +1,85 @@
+<?lsp
+local sensitive=require"SensitiveAction"
+local session=request:session()
+
+local function sendJson(status,body,retryAfter)
+   local encoded=ba.json.encode(body)
+   response:setstatus(status)
+   response:setheader("Cache-Control","no-store")
+   response:setheader("Pragma","no-cache")
+   response:setheader("Referrer-Policy","no-referrer")
+   if retryAfter then response:setheader("Retry-After",tostring(retryAfter)) end
+   response:setcontenttype("application/json; charset=utf-8")
+   response:setcontentlength(#encoded)
+   response:write(encoded)
+end
+
+local function deferredJson(defresp,status,body)
+   if not defresp:valid() then return end
+   local encoded=ba.json.encode(body)
+   defresp:setstatus(status)
+   defresp:setheader("Cache-Control","no-store")
+   defresp:setheader("Pragma","no-cache")
+   defresp:setheader("Referrer-Policy","no-referrer")
+   defresp:setheader("Content-Type","application/json; charset=utf-8")
+   defresp:setcontentlength(#encoded)
+   defresp:send(encoded)
+   defresp:close()
+end
+
+if request:method() ~= "POST" then
+   response:setheader("Allow","POST")
+   return sendJson(405,{error="Verification email requests require POST."})
+end
+if not request:header"x-requested-with" then
+   return sendJson(400,{error="This verification request is not valid."})
+end
+
+local data=request:data()
+if not sensitive.validCsrf(session,data.csrf) then
+   return sendJson(403,{error="This page has expired. Reload it and try again."})
+end
+
+local challenge,purpose,retryAfter=sensitive.begin(session,data.purpose)
+if not challenge then
+   if purpose == "cooldown" then
+      return sendJson(403,{code="rate_limited",error="Please wait before requesting another verification email.",retryAfter=retryAfter},retryAfter)
+   elseif purpose == "rate_limited" then
+      return sendJson(403,{code="rate_limited",error="Too many verification emails were requested. Please try again later.",retryAfter=retryAfter},retryAfter)
+   end
+   return sendJson(400,{error="The verification purpose is invalid."})
+end
+
+local zoneName=zoneT.zname
+local ownerEmail=zoneT.admEmail
+local actor=userT.name or userT.email or "administrator"
+local peer=request:peername()
+local body=string.format([[
+You have requested to %s.
+
+Please enter this secure verification code: %s
+
+The code expires in 10 minutes and can only be used for this request.
+
+Reset your password and review your security settings if you did not initiate this request:
+https://%s/login.html
+]],purpose.description,challenge.code,zoneName)
+local subject="Secure two-step verification notification for "..zoneName
+local sendmail=require"log".sendmail
+local defresp=response:deferred()
+
+ba.thread.run(function()
+   local callOk,mailOk=pcall(sendmail,{
+      subject=subject,
+      to=ownerEmail,
+      body=body
+   })
+   if not callOk or not mailOk then
+      log(true,"Verification email delivery failed for %s in zone %s",purpose.description,zoneName)
+      return deferredJson(defresp,503,{error="The verification email could not be sent. Please try again."})
+   end
+   log(false,"Sent verification request to %s for zone %s by %s originating from %s",
+       purpose.description,zoneName,actor,peer)
+   deferredJson(defresp,200,{ok=true,expiresIn=600})
+end)
+?>

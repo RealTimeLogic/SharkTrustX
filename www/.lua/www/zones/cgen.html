@@ -1,24 +1,26 @@
 <?lsp
-
-
-local data=request:data()
 local session = request:session()
+local sensitive=require"SensitiveAction"
 
---session.verification,data.verification=1,1 -- For test
-
-if not session.verification or session.verification ~= data.verification then
-   response:sendredirect"verification.html?ref=cgen.html"
+if not sensitive.consume(session,"cgen") then
+   response:sendredirect"verification.html?purpose=cgen"
 end
 
 local fmt=string.format
 
 response:reset()
 response:setheader("Content-Disposition", 'attachment; filename="tokengen.c"')
+response:setheader("Cache-Control","no-store")
+response:setheader("Pragma","no-cache")
+response:setheader("Referrer-Policy","no-referrer")
+response:setheader("Strict-Transport-Security","max-age=15552000; includeSubDomains")
 response:setcontenttype("text/plain; charset=utf-8")
 
 local zoneT=db.znameGetZoneT(request:header"host")
 if not zoneT then response:sendredirect"/" end
 local secret=zoneT.zsecret
+log(false,"Generated tokengen.c for zone %s by %s originating from %s",
+    zoneT.zname,userT.name or "administrator",request:peername())
 
 local secretT={}
 for x in secret:gmatch("%x%x") do

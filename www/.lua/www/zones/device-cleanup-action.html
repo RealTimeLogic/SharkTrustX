@@ -1,0 +1,86 @@
+<?lsp
+local sensitive=require"SensitiveAction"
+local session=request:session()
+
+local function sendJson(status,body,extraHeaders)
+   local encoded=ba.json.encode(body)
+   response:setstatus(status)
+   response:setheader("Cache-Control","no-store")
+   response:setheader("Pragma","no-cache")
+   if extraHeaders then
+      for name,value in pairs(extraHeaders) do response:setheader(name,value) end
+   end
+   response:setcontenttype("application/json; charset=utf-8")
+   response:setcontentlength(#encoded)
+   response:write(encoded)
+end
+
+local function deferredJson(defresp,status,body)
+   if not defresp:valid() then return end
+   local encoded=ba.json.encode(body)
+   defresp:setstatus(status)
+   defresp:setheader("Cache-Control","no-store")
+   defresp:setheader("Pragma","no-cache")
+   defresp:setheader("Content-Type","application/json; charset=utf-8")
+   defresp:setcontentlength(#encoded)
+   defresp:send(encoded)
+   defresp:close()
+end
+
+if request:method() ~= "POST" then
+   return sendJson(405,{error="Device cleanup requires POST."},{Allow="POST"})
+end
+if not request:header"x-requested-with" then
+   return sendJson(400,{error="This cleanup request is not valid."})
+end
+local data=request:data()
+if not sensitive.validCsrf(session,data.csrf) then
+   return sendJson(403,{error="This page has expired. Reload it and try again."})
+end
+
+local action=data.action
+local actor=userT.name or userT.email or "administrator"
+local peer=request:peername()
+if action == "preview" then
+   local date=type(data.date) == "string" and data.date or ""
+   local year,month,day=date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+   local cutoff=date.."T00:00:00Z"
+   local valid,parsed=pcall(ba.datetime,cutoff)
+   local today=(ba.datetime"NOW":tostring()):sub(1,10)
+   if not year or not valid or not parsed or parsed:tostring():sub(1,10) ~= date or date >= today then
+      return sendJson(400,{error="Choose a valid date in the past."})
+   end
+   local devices,err=db.getInactiveDevices(zoneT.zid,cutoff)
+   if not devices then
+      log(true,"Inactive-device preview failed for zone %s",zoneT.zname)
+      return sendJson(503,{error="The database query did not complete. Please try again."})
+   end
+   local previewId,expires=sensitive.createCleanupPreview(session,zoneT.zid,cutoff,devices)
+   local public={}
+   for _,device in ipairs(devices) do
+      public[#public+1]={name=device.name,accessTime=device.accessTime}
+   end
+   log(false,"Previewed %d inactive devices for zone %s by %s originating from %s",
+       #public,zoneT.zname,actor,peer)
+   return sendJson(200,{previewId=previewId,expires=expires,count=#public,devices=public})
+elseif action == "remove" then
+   local cutoff,eligible=sensitive.consumeCleanupPreview(session,data.previewId,zoneT.zid)
+   if not cutoff then
+      return sendJson(409,{error="This preview has expired or was already used. Preview the devices again."})
+   end
+   local defresp=response:deferred()
+   app.deleteInactiveDevices(zoneT,cutoff,eligible,function(ok,rows,bindOk)
+      if not ok then
+         log(true,"Inactive-device removal failed for zone %s by %s",zoneT.zname,actor)
+         return deferredJson(defresp,503,{error="The database write did not complete. No devices were removed."})
+      end
+      log(false,"Removed %d inactive devices from zone %s by %s originating from %s",
+          #rows,zoneT.zname,actor,peer)
+      local result={removed=#rows}
+      if not bindOk then result.warning="The devices were removed, but DNS could not be refreshed immediately." end
+      deferredJson(defresp,200,result)
+   end)
+   return
+end
+return sendJson(400,{error="The cleanup action is not supported."})
+?>
