@@ -35,6 +35,9 @@ The software requires two name servers listed in the configuration file. However
   specification for the SharkTrust device-to-portal protocol.
 - [`doc/BACME-Protocol-Legacy.md`](doc/BACME-Protocol-Legacy.md) documents the legacy
   header and refresh-token protocol used by older clients.
+- [`doc/architecture.md`](doc/architecture.md) explains portal components,
+  request flows, persistent state, and security boundaries.
+- [`AGENTS.md`](AGENTS.md) is the maintainer and session-handover guide.
 
 ## Microsoft Entra SSO
 

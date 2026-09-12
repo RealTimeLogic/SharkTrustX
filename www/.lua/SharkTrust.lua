@@ -311,6 +311,28 @@ local function deviceAuthentication(cmd, rawBody)
    return credential, devT, zoneT
 end
 
+local function enrollmentConflict(cmd, data, zoneT, device)
+   -- Snapshot only diagnostic fields before the request ends; never email proofs or credentials.
+   local details={time=os.date("!%Y-%m-%dT%H:%M:%SZ"),zone=zoneT.zname,
+      requested={name=data.name,ipAddress=data.ipAddress,peerAddress=peername(cmd),
+         dns=data.dns or "local",info=data.info,userAgent=cmd:header"User-Agent"},
+      registered={id=device.did,name=device.name,localAddress=device.localAddr,
+         wanAddress=device.wanAddr,dns=device.dns,info=device.info,
+         registeredAt=device.regTime,lastAccess=device.accessTime}}
+   local ok,serpent=pcall(require,"serpent")
+   local body="An authenticated enrollment requested an occupied exact device name. "..
+      "The device may have lost its saved registration after a reset or storage failure. "..
+      "The existing registration was not changed. Verify the device before removing it.\n\n"..
+      (ok and serpent.block(details,{comment=false,sortkeys=true}) or ba.json.encode(details))
+   log(false,"Enrollment name conflict in zone %s for %s",zoneT.zname,device.name)
+   ba.thread.run(function()
+      -- Send now, independently of the normal batched log email schedule.
+      local ok,sent=pcall(function() return require"log".sendmail{
+         subject="SharkTrustX enrollment name conflict",body=body} end)
+      if not ok or not sent then log(true,"Enrollment conflict email delivery failed") end
+   end)
+end
+
 local function commandRegister(cmd, response, data, rawBody, deferredState)
    local zoneT = zoneAuthentication(cmd, rawBody, "SHARKTRUST-REGISTER\0")
    if not zoneT then return end
@@ -325,6 +347,11 @@ local function commandRegister(cmd, response, data, rawBody, deferredState)
    local info = data.info or ""
    if type(info) ~= "string" or #info > 256 or info:find("%c") then
       return failure(cmd, 400, "invalid_info", "info must be printable and at most 256 bytes.")
+   end
+   local requestedCredential=data.credential
+   if requestedCredential ~= nil and
+      (not isHex(requestedCredential,64) or requestedCredential:find("[A-F]")) then
+      return failure(cmd,400,"invalid_device_credential","credential must be 64 lowercase hexadecimal characters.")
    end
    local explicitName=data.name ~= nil
    local namePolicy=data.namePolicy or (explicitName and "exact" or "increment")
@@ -351,7 +378,16 @@ local function commandRegister(cmd, response, data, rawBody, deferredState)
 
    local queued=false
    local ok,resultOrError=xpcall(function()
-      if explicitName and namePolicy == "exact" and db.nameGetDeviceT(zoneT.zid,name) then
+      -- Retry lookup precedes name allocation, under the same enrollment lock.
+      local existing=requestedCredential and db.credentialHashGetDeviceT(credentialHash(requestedCredential))
+      if existing then
+         if existing.zid ~= zoneT.zid then return authFailed(cmd) end
+         return success(cmd,200,{deviceId=existing.dkey,
+            name=fmt("%s.%s",existing.name,zoneT.zname),credential=requestedCredential})
+      end
+      existing=explicitName and namePolicy == "exact" and db.nameGetDeviceT(zoneT.zid,name)
+      if existing then
+         enrollmentConflict(cmd,data,zoneT,existing)
          return failure(cmd,409,"name_unavailable","The requested device name is already in use.")
       end
       if not explicitName or namePolicy == "increment" then
@@ -365,7 +401,7 @@ local function commandRegister(cmd, response, data, rawBody, deferredState)
 
       local rname = db.zoneRname(zoneT.zid)
       if #rname > 0 then rname = rname .. name end
-      local credential,peer = hex(32),peername(cmd)
+      local credential,peer = requestedCredential or hex(32),peername(cmd)
       local defresp = deferResponse(response, deferredState)
       local dkey = db.addDeviceV2(
          zoneT.zkey, name, rname, data.ipAddress, peer, dns, info,

@@ -113,9 +113,10 @@ generic `invalid_credentials` response as any other authentication failure.
 
 ### 3.3 Device credential
 
-The portal creates 32 random bytes for each enrolled device and returns the
-value as 64 lowercase hexadecimal characters. The client treats the value as
-an opaque credential and stores it as securely as the target permits.
+An updated client creates 32 cryptographically random bytes, persists them
+before enrollment, and supplies them as 64 lowercase hexadecimal characters
+in the optional `Register.credential` string. If omitted, the portal generates
+the credential as before. The client stores the credential securely.
 
 Each accepted credential MUST be unique across all devices and zones. The
 portal enforces this with a database-wide unique index on the stored credential
@@ -127,8 +128,10 @@ The client sends the credential as:
 Authorization: Bearer <64-lowercase-hexadecimal-characters>
 ```
 
-The portal stores a verifier rather than the credential. It never returns an
-existing credential. A credential remains valid across portal restarts until
+The portal stores a verifier rather than the credential. An authenticated
+registration retry can echo the credential supplied by that request after
+checking that its verifier belongs to the same zone. It cannot recover or
+return a lost credential from the stored verifier. A credential remains valid across portal restarts until
 its device is removed.
 
 A device credential has no server-enforced maximum age. The portal does not
@@ -251,6 +254,7 @@ X-SharkTrust-Proof: <base64url-hmac-sha-256>
 | Member | Required | Contract |
 | --- | --- | --- |
 | `command` | Yes | Must be the case-sensitive value `Register`. |
+| `credential` | No | String of 64 lowercase hexadecimal characters representing 32 cryptographically random bytes generated and saved by the client before enrollment. Reuse it for retries. Omission retains legacy server-generated credentials. |
 | `name` | No | DNS label or full name in the selected zone. Defaults to `device`. The label contains 1 to 63 lowercase letters, digits, or hyphens and cannot start or end with a hyphen. |
 | `namePolicy` | No | `exact` or `increment`. With an explicit name, the default is `exact`. The field has no effect when `name` is omitted. |
 | `ipAddress` | Yes | Device's local IPv4 address in dotted-decimal form. The standard client discovers and adds this value automatically; it is not an application setting. |
@@ -276,7 +280,33 @@ For example, it tries `controller1`, `controller2`, and so on when `controller`
 is occupied.
 
 When `name` is omitted, the portal starts with `device` and applies the same
-numbered search regardless of `namePolicy`. Enrollment is not idempotent.
+numbered search regardless of `namePolicy`.
+
+With a supplied credential, the portal checks for an existing device under the
+zone enrollment lock before allocating a name. A matching credential in the
+authenticated zone returns HTTP 200 with the existing device ID, assigned name,
+and supplied credential. New registrations return HTTP 201. This retry does
+not allocate another name or alter the existing registration. A credential
+belonging to another zone is rejected. The credential identifies the original
+enrollment even if other fields in a retry differ.
+
+An occupied exact name with a different credential remains HTTP 409. The portal
+immediately queues a direct email send to the configured `log.smtp.to` recipient
+for each such authenticated conflict, independently of batched log delivery.
+The plain-text email includes UTC time, zone, requested name, reported local IP,
+observed peer IP, DNS mode, description, user agent, and the existing device's
+name, database ID, addresses, description, and registration/access times.
+It excludes credentials, proofs, zone secrets, and raw request headers/body.
+Same-credential recovery does not generate a conflict email. SMTP delivery
+failures are logged; successful delivery still depends on SMTP availability.
+
+After a reset or storage loss, the client may generate a new credential for an
+occupied exact name. It retries once per hour without replacing the existing
+device. An administrator must verify the device before resolving the conflict.
+
+Deploy the updated portal before the updated client: older portals may ignore
+the credential field and allocate another device. Without a supplied credential,
+enrollment remains non-idempotent.
 
 The portal serializes concurrent enrollment requests within a zone and holds
 the zone lock until the database write completes. For `exact`, at most one
@@ -428,7 +458,11 @@ Validated TLS protects the credential and request in transit.
 
 `IsAvailable`, `IsRegistered`, `SetIpAddress`, `SetAcmeRecord`,
 `RemoveAcmeRecord`, and `GetWan` are idempotent for the same authenticated
-identity and request data. Enrollment is not idempotent.
+identity and request data. Enrollment is idempotent while the device record
+exists when the client supplies and retains its credential. Legacy enrollment
+without that field is not idempotent. Removing a device deletes its verifier;
+a later authenticated registration is a new enrollment, not recovery of a
+revoked record.
 
 ## 10. Reverse connections
 
