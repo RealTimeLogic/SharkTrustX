@@ -74,8 +74,10 @@ local function cmsfunc(_ENV,relpath,zname)
    _ENV.lspPage=parseLspPage(".lua/www/zones/"..relpath)
 
    if m.raw then
-      _ENV.lspPage(_ENV,relpath,io,pageT,app)
-      return true
+      -- An action page may return its renderer after handling redirects/writes.
+      local render=_ENV.lspPage(_ENV,relpath,io,pageT,app)
+      if type(render) ~= "function" then return true end
+      _ENV.lspPage=render
    end
 
    --Enable when working on template.lsp

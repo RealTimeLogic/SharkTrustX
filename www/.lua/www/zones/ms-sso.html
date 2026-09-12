@@ -1,6 +1,8 @@
 <?lsp
 local subj,msg,recovery
 local sso,ssoErr=app.sso(request:domain())
+response:setheader("Cache-Control","no-store")
+response:setheader("Referrer-Policy","no-referrer")
 
 local function esc(value)
    return tostring(value or ""):gsub("[&<>\"']",{
@@ -8,7 +10,7 @@ local function esc(value)
    })
 end
 
-local function login(payload)
+local function login(payload,registered)
    local email=payload and payload.preferred_username
    if not email then return "Login Failed","The Microsoft identity has no username" end
    local userT=db.getUserT(zoneT.zid,email)
@@ -20,24 +22,24 @@ local function login(payload)
       end
       return "Login Failed","Not authenticated"
    end
+   if registered then return "Login Failed","User lookup failed; try again" end
    if db.getAutoReg(zoneT.zid) then
-      local pending=true
-      db.addUser(zoneT.zid,email,"",false,function() pending=false end)
-      for _=1,60 do
-         if not pending then break end
-         ba.sleep(50)
-      end
-      if pending then return "Login Failed","Database busy; try again" end
-      userT=db.getUserT(zoneT.zid,email)
-      if userT then
-         userT=app.login(request,zoneT,email,"",userT)
-         if userT then
-            request:session(true).userT=userT
-            response:sendredirect"/"
-         end
-         return "Login Failed","Not authenticated"
-      end
-      return "Login Failed","User lookup failed; try again"
+      local session=request:session(true)
+      local result={email=email,zid=zoneT.zid,expires=ba.datetime"NOW" + {mins=10}}
+      local defresp=response:deferred()
+      -- The next request logs in only after commit, without retaining this request.
+      db.addUser(zoneT.zid,email,"",false,function(ok)
+         session.msSsoResult=ok and result or
+            {subject="Login Failed",message="The user could not be saved. Please try again."}
+         if not defresp:valid() then return end
+         defresp:setstatus(303)
+         defresp:setheader("Location","/ms-sso.html")
+         defresp:setheader("Cache-Control","no-store")
+         defresp:setcontentlength(0)
+         defresp:send("")
+         defresp:close()
+      end)
+      return nil,nil,true
    end
    app.sendRegEmail(request,zoneT,{email=email,autoReg=zoneT.autoReg,
                                   zid=zoneT.zid,sso=true})
@@ -52,28 +54,32 @@ if not sso then
    if result then session.msSsoResult=nil end
    subj,msg="Login Failed",result and result.message or ssoErr or "Single Sign On is not available"
 elseif request:method() == "POST" and data.recovery then
-   local ok,err
-   ok,err,recovery=sso.rotate(request,data.secret,data.expires,data.recovery)
+   local ok,err,status
+   ok,err,recovery,status=sso.rotate(request,data.secret,data.expires,data.recovery)
    if ok then return end
-   subj,msg="Credential Rotation Required",err
+   subj,msg=status == "starting" and "Microsoft sign-in is initializing" or
+      recovery and "Credential Rotation Required" or "Login Failed",err
 elseif data.code or data.error then
    local header,payload,codes
    header,payload,codes,recovery=sso.login(request)
    session=session or request:session(true)
    if header then
-      subj,msg=login(payload)
+      local pending
+      subj,msg,pending=login(payload)
+      if pending then return end
    else
       subj,msg="Login Failed",payload
       local labels={
          [7000215]="The configured client secret is invalid.",
-         [7000222]="The configured client secret has expired."
+         [7000222]="The configured client secret has expired.",
+         [700025]="Microsoft Entra treats this application as a public client, but this server uses a client secret. Ask the app-registration owner to configure a Web redirect URI and check the public-client settings."
       }
-      if recovery then
-         for _,code in ipairs(type(codes) == "table" and codes or {}) do
-            if labels[tonumber(code)] then
-               subj,msg="Credential Rotation Required",labels[tonumber(code)]
-               break
-            end
+      for _,code in ipairs(type(codes) == "table" and codes or {}) do
+         code=tonumber(code)
+         if labels[code] then
+            if code == 700025 then recovery=nil end
+            subj,msg=recovery and "Credential Rotation Required" or "Login Failed",labels[code]
+            break
          end
       end
    end
@@ -83,8 +89,19 @@ else
    local result=session and session.msSsoResult
    if not result then response:sendredirect"/" end
    session.msSsoResult=nil
-   subj,msg,recovery=result.subject or "Login Failed",result.message,result.recovery
+   if result.email then
+      if result.zid ~= zoneT.zid or result.expires < ba.datetime"NOW" then
+         subj,msg="Login Failed","The login transaction expired. Please sign in again."
+      else
+         subj,msg=login({preferred_username=result.email},true)
+      end
+   else
+      subj,msg,recovery=result.status == "starting" and "Microsoft sign-in is initializing" or
+         result.subject or "Login Failed",result.message,result.recovery
+   end
 end
+-- Run the controller before the shared template writes any HTML.
+return function()
 ?>
 
 <section class="content">
@@ -109,6 +126,9 @@ end
         <button type="submit" class="btn btn-primary">Test and activate secret</button>
       </form>
 <?lsp end ?>
+<?lsp if not recovery then ?>
+      <a href="/ms-sso.lsp" class="btn btn-primary">Try signing in again</a>
+<?lsp end ?>
     </div>
   </div>
 </section>
@@ -121,4 +141,5 @@ $(function(){
    });
 });
 </script>
+<?lsp end ?>
 <?lsp end ?>

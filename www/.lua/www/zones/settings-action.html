@@ -100,6 +100,10 @@ elseif action == "sso-config" then
    if cfg.client_secret == "" then cfg.client_secret=current.client_secret or "" end
    local origin=request:url():match"^https?://[^/]+"
    cfg.redirect_uri=origin and origin.."/ms-sso.html"
+   if cfg.redirect_uri and not (cfg.redirect_uri:match"^https://" or
+                               cfg.redirect_uri:match"^http://localhost[:/]") then
+      return sendJson(400,{error="Single Sign On requires HTTPS. Open the portal using HTTPS and try again."})
+   end
    local year,month,day=cfg.client_secret_expires:match"^(%d%d%d%d)%-(%d%d)%-(%d%d)$"
    local dateOk,expires=pcall(function()
       return year and ba.datetime(string.format("%s-%s-%sT23:59:59Z",year,month,day))

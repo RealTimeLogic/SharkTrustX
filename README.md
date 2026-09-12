@@ -55,6 +55,18 @@ If Microsoft rejects an invalid or expired secret during login, the portal
 displays a credential-recovery form. The replacement secret is verified by a
 new Microsoft sign-in before it is saved for the zone.
 
+While Microsoft sign-in initializes, the portal displays a temporary status
+and a retry link. SSO settings require an HTTPS redirect URI, except for
+localhost testing. If Entra reports error `700025`, check that the app
+registration uses a **Web** redirect URI and the appropriate public-client
+settings; replacing the client secret does not resolve that configuration error.
+
+A verified replacement becomes active in memory immediately. Its database
+write completes asynchronously, and the portal reports whether it was saved.
+If saving fails, login can still succeed, but the replacement will not survive
+a restart. Automatic user registration completes its database write before
+the browser is allowed to finish logging in.
+
 ## Customizing SharkTrustX
 
 1. Fork or clone this repository.

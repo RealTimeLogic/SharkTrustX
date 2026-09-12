@@ -909,40 +909,22 @@ do -- SSO zone cache
                if not ok then log(true,"SSO notification email failed: %s",err) end
             end)
          end
-         local function savecredential(secret,metadata)
+         local function savecredential(secret,metadata,done)
             ssoCfgT.client_secret=secret
             ssoCfgT.client_secret_expires=metadata.expires
-            local completed,saved
             db.setSsoCfg(zoneT.zid,ssoCfgT,function(ok)
-               completed=true
-               saved=ok
+               done(ok,not ok and "Database write failed" or nil)
             end)
-            for _=1,100 do
-               if completed then
-                  if saved then return true end
-                  return nil,"Database write failed"
-               end
-               ba.sleep(50)
-            end
-            return nil,"Database busy; the credential was not saved"
+            return "pending"
          end
          local ok,value=pcall(require"ms-sso".init,ssoCfgT,
                               {log=ssolog,notify=notify,savecredential=savecredential})
          if not ok then return nil,value end
          sso=value
          if changed then
-            local completed,saved
             db.setSsoCfg(zoneT.zid,ssoCfgT,function(ok)
-               completed=true
-               saved=ok
+               if not ok then log(true,"Cannot persist SSO defaults for %s",host) end
             end)
-            for _=1,200 do
-               if completed then break end
-               ba.sleep(50)
-            end
-            if not saved then
-               return nil,"Database busy; the updated SSO configuration was not saved"
-            end
          end
          ssoT[host]=sso
       end
@@ -963,8 +945,7 @@ do -- SSO zone cache
    end
 end
 
--- Database-backed startup upgrades above must finish before BIND and
--- certificate initialization enumerate the same zones.
+-- SSO default writes are queued; no read cursor is held while they commit.
 ba.thread.run(delayedLoad)
 
 end) -- End: Entire file wrapped in a function
