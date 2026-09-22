@@ -26,6 +26,7 @@ routing.
 | Reverse connections | `RevConnBridge.lua` owns device sockets, temporary names, browser queues, timeouts, and cleanup. |
 | Microsoft Entra single sign-on | `ms-sso.lua` validates OpenID Connect results. `.preload` caches one configured provider per zone. |
 | Browser routes | `.lua/www/admin.lua` and `.lua/www/zones.lua` render private HTML templates through the shared light dashboard shell. |
+| Client diagnostics | `ClientLog.lua` formats device and observed peer addresses. Request handlers pass the scoped logger to deferred DNS/database callbacks and reverse connections; the logger retains only address strings. |
 | Unload | `onunload()` closes cached Entra providers. Mako owns the remaining application teardown. |
 
 Mutable data does not belong in the ZIP. The deployment working directory

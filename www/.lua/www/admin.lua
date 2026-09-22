@@ -31,6 +31,8 @@ end
 
 
 local function cmsfunc(_ENV,relpath)
+   local ClientLog=require"ClientLog"
+   _ENV.log=ClientLog.logger(_G.log,ClientLog.context(request:peername()))
    if #relpath == 0 or relpath:find"/$" then
       relpath = relpath.."index.html"
    end
@@ -57,7 +59,7 @@ local function cmsfunc(_ENV,relpath)
    _ENV.relpath=relpath
    _ENV.activeMenuItem=m
    _ENV.userT=userT
-   _ENV.lspPage=parseLspPage(".lua/www/admin/"..relpath)
+   _ENV.lspPage=parseLspPage(".lua/www/admin/"..relpath,_ENV.log)
 
    response:setheader("strict-transport-security","max-age=15552000")
 

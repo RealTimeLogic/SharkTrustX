@@ -23,20 +23,21 @@ local function hasCode(codes,code)
    end
 end
 
-local function notify(self,event)
+local function notify(self,event,context)
    if not self.notify then return end
+   if context then event.message=event.message..context end
    local ok,err=pcall(self.notify,event)
-   if not ok then self.log("Notification callback failed: %s",tostring(err)) end
+   if not ok then self.log("Notification callback failed: %s%s",tostring(err),context or "") end
 end
 
-local function notifyCredentialError(self,codes)
+local function notifyCredentialError(self,codes,context)
    for code,kind in pairs(secretCodes) do
       if hasCode(codes,code) and not self.notified[kind] then
          self.notified[kind]=true
          notify(self,{kind=kind,expires=self.openidT.client_secret_expires,
                       message=kind == "credential-expired" and
                          "The Microsoft Entra client secret has expired." or
-                         "Microsoft Entra rejected the configured client secret."})
+                         "Microsoft Entra rejected the configured client secret."},context)
       end
    end
 end
@@ -207,11 +208,14 @@ local function takeTransaction(cmd)
 end
 
 local function completeLogin(self,cmd)
+   -- Snapshot host-supplied diagnostic context before any deferred storage work.
+   local context=self.context and self.context(cmd)
+   local function log(...) self.log("%s%s",fmt(...),context or "") end
    local tx,session=takeTransaction(cmd)
    if not tx then return nil,session end
    local providerError=cmd:data"error"
    if providerError then
-      self.log("Microsoft sign-in returned: %s",tostring(providerError))
+      log("Microsoft sign-in returned: %s",tostring(providerError))
       return nil,"Microsoft sign-in was not completed"
    end
    local code=cmd:data"code"
@@ -227,8 +231,8 @@ local function completeLogin(self,cmd)
    rsp=parsed and rsp or nil
    if status ~= 200 or not rsp or type(rsp.id_token) ~= "string" then
       local codes=rsp and rsp.error_codes
-      notifyCredentialError(self,codes)
-      self.log("Token exchange failed: status=%s error=%s code=%s",tostring(status),
+      notifyCredentialError(self,codes,context)
+      log("Token exchange failed: status=%s error=%s code=%s",tostring(status),
                tostring(rsp and rsp.error or "invalid_response"),
                tostring(codes and codes[1] or "none"))
       local recovery
@@ -237,7 +241,7 @@ local function completeLogin(self,cmd)
    end
    local header,payload=validateToken(self,rsp.id_token,tx.nonce)
    if not header then
-      self.log("ID token validation failed: %s",tostring(payload))
+      log("ID token validation failed: %s",tostring(payload))
       return nil,"The Microsoft identity response could not be validated"
    end
    if tx.candidate then
@@ -250,12 +254,12 @@ local function completeLogin(self,cmd)
          if completed then return end
          completed=true
          if not ok then
-            self.log("Credential persistence callback failed: %s",tostring(err))
+            log("Credential persistence callback failed: %s",tostring(err))
             notify(self,{kind="credential-update-failed",expires=tx.candidate.expires,
-                         message="The new client secret works, but the application could not persist it."})
+                         message="The new client secret works, but the application could not persist it."},context)
          else
             notify(self,{kind="credential-updated",expires=tx.candidate.expires,
-                         message="The Microsoft Entra client secret was updated."})
+                         message="The Microsoft Entra client secret was updated."},context)
          end
       end
       if self.savecredential then
@@ -309,7 +313,7 @@ local function init(openidT,loginOrOptions,options)
       alertDays[#alertDays+1]=days
    end
    local self={openidT=openidT,keys={},provider=nil,closed=false,
-               notified={},alerted={},notify=options.notify,savecredential=options.savecredential,
+               notified={},alerted={},notify=options.notify,savecredential=options.savecredential,context=options.context,
                alertDays=alertDays}
    table.sort(self.alertDays)
    self.log=options.log and function(...) options.log(fmt(...)) end or defaultLog

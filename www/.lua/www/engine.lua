@@ -1,7 +1,7 @@
 
 local log=_G.log
 
-local function parseLspPage(name)
+local function parseLspPage(name,clientLog)
    local func
    local fp,err=io:open(name)
    if fp then
@@ -15,7 +15,7 @@ local function parseLspPage(name)
          if func then return func end
       end
    end
-   log(true,"parsing %s failed: %s",name,err)
+   (clientLog or log)(true,"parsing %s failed: %s",name,err)
    return function(_ENV) print(name,err) end
 end
 -- Cache the template page.

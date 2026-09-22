@@ -108,6 +108,7 @@ local function log(iserr,fmts,...)
    return nil, msg
 end
 _G.log = log -- Make global. Used by other modules and LSP pages.
+local ClientLog=require"ClientLog"
 
 local rtm = require"RefreshTokenManager"
 local PBKDF2Cache = require"PBKDF2Cache".getDK
@@ -163,11 +164,11 @@ end
 
 
 -- Execute command 'cmd' in /usr/sbin/ with 'args'
-local function execsbin(cmd,args)
+local function execsbin(cmd,args,clientLog)
    cmd=fmt("/usr/sbin/%s %s",cmd,args)
    local resp,ecode=baexec(cmd)
    if ecode ~= 0 then
-      log(true, "Command %s failed: %s %s", cmd, tostring(ecode), resp)
+      (clientLog or log)(true, "Command %s failed: %s %s", cmd, tostring(ecode), resp)
    end
    return {cmd=cmd,resp=resp,ecode=ecode}
 end
@@ -279,7 +280,7 @@ end
 
 -- Update the 'bind' database file for zone
 -- 'bind' to reload DB.
-local function bindUpdateZone(zoneT)
+local function bindUpdateZone(zoneT,clientLog)
    local recsT=getRecsTfromZoneT(zoneT)
    local extraRecsT={}
    for _,recT in pairs(recsT) do
@@ -288,19 +289,19 @@ local function bindUpdateZone(zoneT)
       end
    end
    bindzonedb(zoneT, extraRecsT)
-   execsbin("rndc","reload "..zoneT.zname)
+   execsbin("rndc","reload "..zoneT.zname,clientLog)
 end
 
 local rcBridge=require"RevConnBridge"
 rcBridge.init{
-   setRec=function(zname,recname, noUpdate)
+   setRec=function(zname,recname, noUpdate,clientLog)
       local zoneT = db.znameGetZoneT(zname)
       if zoneT then
          local t = RevConRecsT[zname]
          if not t then t={} RevConRecsT[zname]=t end
          t[recname]=true
       end
-      if not noUpdate then bindUpdateZone(zoneT) end
+      if not noUpdate then bindUpdateZone(zoneT,clientLog) end
    end,
    removeRec=function(zname,recname)
       local t = RevConRecsT[zname]
@@ -434,19 +435,21 @@ local function deleteZone(zname)
    end)
 end
 
-local function deleteDevice(zoneT, dkey, func)
+local function deleteDevice(zoneT, dkey, func,clientLog)
+   local log=clientLog or log
    db.removeDevice(dkey, function(ok,err)
       local bindOk=true
-      if ok then bindOk,err=pcall(bindUpdateZone,zoneT) end
+      if ok then bindOk,err=pcall(bindUpdateZone,zoneT,log) end
       if not bindOk then log(true,"Device DNS refresh failed for zone %s",zoneT.zname) end
       if func then func(ok,err,bindOk) end
    end)
 end
 
-local function deleteInactiveDevices(zoneT,cutoff,eligible,func)
+local function deleteInactiveDevices(zoneT,cutoff,eligible,func,clientLog)
+   local log=clientLog or log
    db.removeInactiveDevices(zoneT.zid,cutoff,eligible,function(ok,result)
       local bindOk,bindErr=true
-      if ok then bindOk,bindErr=pcall(bindUpdateZone,zoneT) end
+      if ok then bindOk,bindErr=pcall(bindUpdateZone,zoneT,log) end
       if not bindOk then log(true,"Inactive-device DNS refresh failed for zone %s",zoneT.zname) end
       if func then func(ok,result,bindOk,bindErr) end
    end)
@@ -460,8 +463,8 @@ local sharkTrust=require"SharkTrust".init{
    getProofKey=function(zoneT)
       return PBKDF2Cache(zoneT.zkey, supper(zoneT.zsecret))
    end,
-   reverseConnection=function(zoneT,devT,sock)
-      rcBridge.newDevice(zoneT.zname,devT.rname,devT.dkey,sock)
+   reverseConnection=function(zoneT,devT,sock,clientLog)
+      rcBridge.newDevice(zoneT.zname,devT.rname,devT.dkey,sock,clientLog)
    end,
    log=log
 }
@@ -498,11 +501,12 @@ local function getDnsType(hT)
 end
 
 
-local function lookupDev(cmd,hT)
+local function lookupDev(cmd,hT,diagnostic)
    local dkey=hT["X-Dev"]
    if not dkey then return errorRsp(cmd, 400, "No X-Dev") end
    local devT = db.keyGetDeviceT(dkey)
    if not devT then return errorRsp(cmd,404,"Unknown X-Dev") end
+   ClientLog.device(diagnostic.context,devT,hT["X-IpAddress"])
    return dkey, devT
 end
 
@@ -535,7 +539,14 @@ end
 
 
 -- Client "Register" device command
-local function cmdRegister(cmd,hT,zkey,zoneT)
+local function legacyDnsCallback(zoneT,diagnostic)
+   return function()
+      local ok=pcall(bindUpdateZone,zoneT,diagnostic.log)
+      if not ok then diagnostic.log(true,"BACME DNS refresh failed for zone %s",zoneT.zname) end
+   end
+end
+
+local function cmdRegister(cmd,hT,zkey,zoneT,diagnostic)
    local ip=getAndCheckIp(cmd,hT)
    if not ip then return end
    local name=getName(cmd,hT,zoneT)
@@ -551,14 +562,14 @@ local function cmdRegister(cmd,hT,zkey,zoneT)
       ix,orgn=0,rname
       while db.nameGetDeviceT(zoneT.zid,rname) do ix=ix+1 rname=fmt("%s%d",orgn,ix) end
    end
-   local dkey=db.addDevice(zoneT.zkey,name,rname,ip,peername(cmd),getDnsType(hT),hT["X-Info"] or "", function() bindUpdateZone(zoneT) end)
+   local dkey=db.addDevice(zoneT.zkey,name,rname,ip,peername(cmd),getDnsType(hT),hT["X-Info"] or "",legacyDnsCallback(zoneT,diagnostic))
    rsp(cmd, {["X-Dev"]=dkey, ["X-Name"]=fmt("%s.%s",name,zoneT.zname)})
 end
 
 
 -- Client "IsRegistered" device command
-local function cmdIsRegistered(cmd,hT,zkey,zoneT)
-   local dkey,devT = lookupDev(cmd,hT)
+local function cmdIsRegistered(cmd,hT,zkey,zoneT,diagnostic)
+   local dkey,devT = lookupDev(cmd,hT,diagnostic)
    if not dkey then return end
    local peer = peername(cmd)
    if devT.wanAddr ~= peer then
@@ -576,15 +587,15 @@ local function cmdIsAvailable(cmd,hT,zkey,zoneT)
 end
 
 -- Client "SetIpAddress" device command
-local function cmdSetIpAddress(cmd,hT,zkey,zoneT)
-   local dkey,devT = lookupDev(cmd,hT)
+local function cmdSetIpAddress(cmd,hT,zkey,zoneT,diagnostic)
+   local dkey,devT = lookupDev(cmd,hT,diagnostic)
    if not dkey then return end
    local ip=getAndCheckIp(cmd,hT)
    if not ip then return end
    local wan=peername(cmd)
    local dtype=getDnsType(hT)
    if devT.localAddr~=ip or devT.wanAddr~=wan or devT.dns~=dtype then
-      db.updateAddress4Device(dkey,ip,wan,dtype,function() bindUpdateZone(zoneT) end)
+      db.updateAddress4Device(dkey,ip,wan,dtype,legacyDnsCallback(zoneT,diagnostic))
    else
       db.updateTime4Device(dkey)
    end
@@ -592,8 +603,8 @@ local function cmdSetIpAddress(cmd,hT,zkey,zoneT)
 end
 
 -- Client "SetAcmeRecord" device command
-local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
-   local dkey,devT = lookupDev(cmd,hT)
+local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT,diagnostic)
+   local dkey,devT = lookupDev(cmd,hT,diagnostic)
    if not dkey then return end
    local rname=hT['X-RecordName']
    local rdata=hT['X-RecordData']
@@ -604,7 +615,7 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
    recT[rname]=rdata
    -- In case device dos not call cmdRemoveAcmeRecord
    ba.timer(function() recsT[dkey] = nil end):set(dnsResolveTmo+10000,true)
-   bindUpdateZone(zoneT)
+   bindUpdateZone(zoneT,diagnostic.log)
    db.updateTime4Device(dkey)
    local peer = peername(cmd)
    if devT.wanAddr ~= peer then
@@ -614,12 +625,12 @@ local function cmdSetAcmeRecord(cmd,hT,zkey,zoneT)
 end
 
 -- Client "RemoveAcmeRecord" device command
-local function cmdRemoveAcmeRecord(cmd,hT,zkey,zoneT)
-   local dkey,devT = lookupDev(cmd,hT)
+local function cmdRemoveAcmeRecord(cmd,hT,zkey,zoneT,diagnostic)
+   local dkey,devT = lookupDev(cmd,hT,diagnostic)
    if not dkey then return end
    local recsT=getRecsTfromZoneT(zoneT)
    recsT[dkey] = nil
-   bindUpdateZone(zoneT)
+   bindUpdateZone(zoneT,diagnostic.log)
    rsp(cmd)
 end
 
@@ -629,12 +640,12 @@ local function cmdGetWan(cmd,hT,zkey,zoneT)
    rsp(cmd,hT)
 end
 
-local function cmdRevCon(cmd,hT,zkey,zoneT)
-   local dkey,devT = lookupDev(cmd,hT)
+local function cmdRevCon(cmd,hT,zkey,zoneT,diagnostic)
+   local dkey,devT = lookupDev(cmd,hT,diagnostic)
    if not dkey then return end
    cmd:setstatus(202)
    cmd:flush()
-   rcBridge.newDevice(zoneT.zname,devT.rname,dkey,ba.socket.req2sock(cmd))
+   rcBridge.newDevice(zoneT.zname,devT.rname,dkey,ba.socket.req2sock(cmd),diagnostic.log)
 end
 
 -- All commands (functions)
@@ -654,7 +665,7 @@ local function b64Dec(b64)
 end
 
 -- Find and execute client command
-local function command(cmd)
+local function command(cmd,diagnostic)
    local hT=xssfilter(trim(cmd:header()))
    local zkey,rtoken,token,hash =
       hT["X-Key"],
@@ -675,15 +686,21 @@ local function command(cmd)
    if token ~= ba.crypto.hash"sha256"(hash)(dk)(serverIP)(rtoken)(true,"binary") then
       return errorRsp(cmd,403, "Invalid token")
    end
+   ClientLog.device(diagnostic.context,nil,hT["X-IpAddress"])
    local c=commandT[hT["X-Command"]]
    if not c then return errorRsp(cmd,400,"Unknown  X-Command") end
-   c(cmd,hT,zkey,zoneT)
+   c(cmd,hT,zkey,zoneT,diagnostic)
 end
 
 -- LSP page "/command.lsp" calls app.command
-local function msgh(emsg) log(true,"%s",debug.traceback(emsg)) return emsg end
 function app.command(cmd)
-   local ok, err = xpcall(command,msgh,cmd) -- trap any Lua error
+   local diagnostic={context=ClientLog.context(peername(cmd))}
+   diagnostic.log=ClientLog.logger(log,diagnostic.context)
+   local function msgh(emsg)
+      diagnostic.log(true,"%s",debug.traceback("BACME internal request failure",2))
+      return emsg
+   end
+   local ok, err = xpcall(command,msgh,cmd,diagnostic) -- trap any Lua error
    if not ok then errorRsp(cmd,500,err) end -- Server error
 end
 
@@ -906,7 +923,7 @@ do -- SSO zone cache
                   subject="Microsoft Entra credential: "..event.kind,
                   body=msg.."\n\nZone: "..host
                }
-               if not ok then log(true,"SSO notification email failed: %s",err) end
+               if not ok then log(true,"SSO notification email failed for %s: %s; %s",host,err,msg) end
             end)
          end
          local function savecredential(secret,metadata,done)
@@ -918,7 +935,8 @@ do -- SSO zone cache
             return "pending"
          end
          local ok,value=pcall(require"ms-sso".init,ssoCfgT,
-                              {log=ssolog,notify=notify,savecredential=savecredential})
+                              {log=ssolog,notify=notify,savecredential=savecredential,
+                               context=function(cmd) return ClientLog.suffix(ClientLog.context(peername(cmd))) end})
          if not ok then return nil,value end
          sso=value
          if changed then

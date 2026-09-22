@@ -82,6 +82,28 @@ An error flushes the pending buffer immediately with the subject
 Mako sends the buffer when its configured delay or size limit is reached.
 Foreground runs print these portal log messages to the console instead.
 
+Client-related portal diagnostics use the same address suffix in the console,
+buffered log emails, and separate enrollment-conflict or sign-in notices:
+`[device IP=192.168.1.50; WAN IP=203.0.113.20]`.
+
+- **Device IP** is the valid IPv4 address reported by the authenticated device,
+  or its last registered local address when the request has no new address.
+  The stored address can be stale. Before device authentication, or when no
+  valid local address is available, the value is `unknown`.
+- **WAN IP** is the connection peer observed by the portal, including IPv6
+  when applicable. Behind a proxy, this identifies the proxy. The portal does
+  not substitute a forwarded HTTP header for this address.
+- Browser administration and Microsoft sign-in diagnostics use
+  `device IP=unknown`: an ordinary browser request does not disclose the
+  browser computer's private address. Its observed WAN IP is still included.
+
+Deferred writes, email delivery failures, and device DNS cleanup retain the
+addresses of the initiating request. Background certificate maintenance,
+provider refreshes, scheduled credential-expiration notices, and low-level
+database or Mako runtime traces have no associated client address context.
+Rejected HTTP requests do not each generate a new email; the existing
+notification triggers and batching rules still apply.
+
 ### Enrollment Name Conflicts
 
 `Enrollment name conflict in zone local.makoserver.net for test` means an
@@ -164,7 +186,7 @@ device-side `ACME event` messages are a separate client log.
 | `Cert ... not found`, `Warn: no certificates to load!` | The selected certificate profile has no file to load. Initial issuance can resolve this automatically. If it persists or HTTPS lacks the expected certificate, inspect issuance errors and the writable `acmecert/` directory. |
 | `UTCTime parse error for ...` | A stored certificate's expiration could not be parsed. The updater treats it as due for replacement. Check the certificate file and subsequent issuance results; replacement may recover it, but repeated parse errors need investigation. |
 | `Creating shark-cert failed: ...` | Installing the available certificate set into the HTTPS listener failed. This is not proof that certificate issuance failed. There is no dedicated installation retry loop. Inspect the error, certificate/key compatibility, and subsequent installation results; successful HTTPS with an older certificate does not establish recovery. |
-| `Command ... failed: ...`, `Device DNS refresh failed for zone ...`, `Inactive-device DNS refresh failed for zone ...` | A system/BIND command or DNS refresh failed. There is no dedicated retry queue for these failed changes. Check BIND configuration, permissions, and `rndc`, then repeat the affected refresh and verify DNS. A committed database change can exist even when DNS has not been updated. |
+| `Command ... failed: ...`, `Device DNS refresh failed for zone ...`, `Inactive-device DNS refresh failed for zone ...`, `BACME DNS refresh failed for zone ...`, `Reverse-connection DNS refresh failed for zone ...`, `SharkTrust timed DNS cleanup failed` | A system/BIND command or DNS refresh failed. There is no dedicated retry queue for these failed changes. Check BIND configuration, permissions, and `rndc`, then repeat the affected refresh and verify DNS. A committed database change can exist even when DNS has not been updated. |
 | `No ZoneT for ...`, `Terminating zone warn: cannot find ...` | The requested zone was not available to the operation. Check whether it was removed or renamed and inspect the operation's result. No automatic repair is promised. |
 | `Settings database write failed ...`, `Inactive-device preview failed ...`, `Inactive-device removal failed ...` | A storage operation failed; the portal does not automatically repeat that administrative action. Check storage and the response shown in the browser. For cleanup, obtain a new preview before trying removal again. |
 | `Settings post-commit action failed ...`, `SharkTrust post-commit action failed ...`, `SharkTrust completion action failed ...`, `SharkTrust response creation failed` | A follow-up action or response failed, possibly after the database change committed. Inspect current device/settings state and DNS before repeating a change. Do not assume an error means nothing was saved. No general automatic replay is provided. |
@@ -199,6 +221,7 @@ may also be undeliverable, so inspect the local service log. Retry the requested
 verification or account action after correcting delivery.
 
 Message handling is implemented in [portal startup](www/.preload),
+[shared client diagnostics](www/.lua/ClientLog.lua),
 [device enrollment](www/.lua/SharkTrust.lua),
 [certificate maintenance](www/.lua/CertUpdater.lua),
 [Microsoft sign-in](www/.lua/ms-sso.lua), and the

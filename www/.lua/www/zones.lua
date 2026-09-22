@@ -31,6 +31,8 @@ for _,m in ipairs(menuL) do
 end
 
 local function cmsfunc(_ENV,relpath,zname)
+   local ClientLog=require"ClientLog"
+   _ENV.log=ClientLog.logger(_G.log,ClientLog.context(request:peername()))
    local m,pageT,userT
    if zoneT then
       if #relpath == 0 or relpath:find"/$" then
@@ -71,7 +73,7 @@ local function cmsfunc(_ENV,relpath,zname)
    _ENV.relpath=relpath
    _ENV.activeMenuItem=m
    _ENV.userT=userT
-   _ENV.lspPage=parseLspPage(".lua/www/zones/"..relpath)
+   _ENV.lspPage=parseLspPage(".lua/www/zones/"..relpath,_ENV.log)
 
    if m.raw then
       -- An action page may return its renderer after handling redirects/writes.

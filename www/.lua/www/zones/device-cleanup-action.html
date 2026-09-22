@@ -79,7 +79,7 @@ elseif action == "remove" then
       local result={removed=#rows}
       if not bindOk then result.warning="The devices were removed, but DNS could not be refreshed immediately." end
       deferredJson(defresp,200,result)
-   end)
+   end,log)
    return
 end
 return sendJson(400,{error="The cleanup action is not supported."})

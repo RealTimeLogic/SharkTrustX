@@ -25,6 +25,8 @@ local devT=dname and db.nameGetDeviceT(zoneT.zid,dname)
 if not devT then return send(404,{ok=false,err="Not found"}) end
 
 local defresp=response:deferred()
+local ClientLog=require"ClientLog"
+local clientLog=ClientLog.logger(log,ClientLog.context(request:peername()))
 app.deleteDevice(zoneT,devT.dkey,function(ok,err,bindOk)
    if not defresp:valid() then return end
    defresp:setheader("Cache-Control","no-store")
@@ -36,5 +38,5 @@ app.deleteDevice(zoneT,devT.dkey,function(ok,err,bindOk)
    defresp:setcontentlength(#body)
    defresp:send(body)
    defresp:close()
-end)
+end,clientLog)
 ?>

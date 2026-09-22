@@ -1,5 +1,6 @@
 local fmt = string.format
 local lower = string.lower
+local ClientLog = require"ClientLog"
 
 local MAX_BODY = 4096
 local AUTH_WINDOW = 60
@@ -237,18 +238,18 @@ local function deviceLabel(cmd, value, zoneT)
    return name
 end
 
-local function writeCallback(defresp, status, result, afterCommit, onComplete)
+local function writeCallback(log, defresp, status, result, afterCommit, onComplete)
    return function(ok, err, ...)
       if ok and afterCommit then
-         local callbackOk, callbackErr = pcall(afterCommit)
+         local callbackOk = pcall(afterCommit)
          if not callbackOk then
-            log(true, "SharkTrust post-commit action failed: %s", callbackErr)
+            log(true, "SharkTrust post-commit action failed")
          end
       end
       if onComplete then
-         local completeOk, completeErr = pcall(onComplete)
+         local completeOk = pcall(onComplete)
          if not completeOk then
-            log(true, "SharkTrust completion action failed: %s", completeErr)
+            log(true, "SharkTrust completion action failed")
          end
       end
       if not ok then
@@ -286,7 +287,7 @@ local function zoneAuthentication(cmd, rawBody, purpose)
    return zoneT
 end
 
-local function deviceAuthentication(cmd, rawBody)
+local function deviceAuthentication(cmd, rawBody, diagnostic)
    if not checkRate(cmd) then return nil end
    local header = cmd:header"Authorization"
    local scheme, credential
@@ -308,10 +309,12 @@ local function deviceAuthentication(cmd, rawBody)
       return nil
    end
    authSucceeded(cmd)
+   ClientLog.device(diagnostic.context,devT)
    return credential, devT, zoneT
 end
 
-local function enrollmentConflict(cmd, data, zoneT, device)
+local function enrollmentConflict(cmd, data, zoneT, device, diagnostic)
+   local log=diagnostic.log
    -- Snapshot only diagnostic fields before the request ends; never email proofs or credentials.
    local details={time=os.date("!%Y-%m-%dT%H:%M:%SZ"),zone=zoneT.zname,
       requested={name=data.name,ipAddress=data.ipAddress,peerAddress=peername(cmd),
@@ -323,6 +326,7 @@ local function enrollmentConflict(cmd, data, zoneT, device)
    local body="An authenticated enrollment requested an occupied exact device name. "..
       "The device may have lost its saved registration after a reset or storage failure. "..
       "The existing registration was not changed. Verify the device before removing it.\n\n"..
+      ClientLog.suffix(diagnostic.context).."\n"..
       (ok and serpent.block(details,{comment=false,sortkeys=true}) or ba.json.encode(details))
    log(false,"Enrollment name conflict in zone %s for %s",zoneT.zname,device.name)
    ba.thread.run(function()
@@ -336,6 +340,7 @@ end
 local function commandRegister(cmd, response, data, rawBody, deferredState)
    local zoneT = zoneAuthentication(cmd, rawBody, "SHARKTRUST-REGISTER\0")
    if not zoneT then return end
+   ClientLog.device(deferredState.context,nil,data.ipAddress)
 
    if not validIPv4(data.ipAddress) then
       return failure(cmd, 400, "invalid_ip_address", "ipAddress must be an IPv4 address.")
@@ -387,7 +392,7 @@ local function commandRegister(cmd, response, data, rawBody, deferredState)
       end
       existing=explicitName and namePolicy == "exact" and db.nameGetDeviceT(zoneT.zid,name)
       if existing then
-         enrollmentConflict(cmd,data,zoneT,existing)
+         enrollmentConflict(cmd,data,zoneT,existing,deferredState)
          return failure(cmd,409,"name_unavailable","The requested device name is already in use.")
       end
       if not explicitName or namePolicy == "increment" then
@@ -407,6 +412,7 @@ local function commandRegister(cmd, response, data, rawBody, deferredState)
          zoneT.zkey, name, rname, data.ipAddress, peer, dns, info,
          credentialHash(credential),
          writeCallback(
+            deferredState.log,
             defresp,
             201,
             function(committedDkey)
@@ -416,7 +422,7 @@ local function commandRegister(cmd, response, data, rawBody, deferredState)
                   credential=credential
                }
             end,
-            function() bindUpdateZone(zoneT) end,
+            function() bindUpdateZone(zoneT,deferredState.log) end,
             function() enrollmentLocks[lockKey]=nil end
          )
       )
@@ -446,7 +452,7 @@ end
 local function commandIsRegistered(cmd, _, devT, zoneT, response, deferredState)
    local peer = peername(cmd)
    local defresp = deferResponse(response, deferredState)
-   local callback = writeCallback(defresp, 200, {
+   local callback = writeCallback(deferredState.log, defresp, 200, {
       registered=true,
       deviceId=devT.dkey,
       name=fmt("%s.%s", devT.name, zoneT.zname)
@@ -471,14 +477,15 @@ local function commandSetIpAddress(cmd, data, devT, zoneT, response, deferredSta
    local defresp = deferResponse(response, deferredState)
    db.updateAddress4Device(devT.dkey, data.ipAddress, peer, dns,
       writeCallback(
+         deferredState.log,
          defresp,
          200,
          {name=fmt("%s.%s", devT.name, zoneT.zname)},
-         function() bindUpdateZone(zoneT) end
+         function() bindUpdateZone(zoneT,deferredState.log) end
       ))
 end
 
-local function commandSetAcmeRecord(cmd, data, devT, zoneT)
+local function commandSetAcmeRecord(cmd, data, devT, zoneT, _, diagnostic)
    local recordName = data.recordName
    local recordData = data.recordData
    if type(recordName) ~= "string" or #recordName > 253 then
@@ -506,18 +513,19 @@ local function commandSetAcmeRecord(cmd, data, devT, zoneT)
    ba.timer(function()
       if recsT[devT.dkey] == recT then
          recsT[devT.dkey] = nil
-         bindUpdateZone(zoneT)
+         local ok=pcall(bindUpdateZone,zoneT,diagnostic.log)
+         if not ok then diagnostic.log(true,"SharkTrust timed DNS cleanup failed") end
       end
    end):set(timeout + 10000, true)
-   bindUpdateZone(zoneT)
+   bindUpdateZone(zoneT,diagnostic.log)
    db.updateTime4Device(devT.dkey)
    return success(cmd, 200, {set=true})
 end
 
-local function commandRemoveAcmeRecord(cmd, _, devT, zoneT)
+local function commandRemoveAcmeRecord(cmd, _, devT, zoneT, response, diagnostic)
    local recsT = getRecsTfromZoneT(zoneT)
    recsT[devT.dkey] = nil
-   bindUpdateZone(zoneT)
+   bindUpdateZone(zoneT,diagnostic.log)
    return success(cmd, 200, {removed=true})
 end
 
@@ -539,18 +547,19 @@ local function command(cmd, response, deferredState)
    local valid,isReverse=methodAndTransport(cmd)
    if not valid then return end
    if isReverse then
-      local _,devT,zoneT=deviceAuthentication(cmd,"")
+      local _,devT,zoneT=deviceAuthentication(cmd,"",deferredState)
       if not devT then return end
       cmd:setstatus(202)
       cmd:flush()
-      return reverseConnection(zoneT,devT,ba.socket.req2sock(cmd))
+      return reverseConnection(zoneT,devT,ba.socket.req2sock(cmd),deferredState.log)
    end
    local data, rawBody = readJson(cmd)
    if not data then return end
    local handler=zoneCommandHandlers[data.command]
    if handler then return handler(cmd,response,data,rawBody,deferredState) end
-   local _, devT, zoneT = deviceAuthentication(cmd, rawBody)
+   local _, devT, zoneT = deviceAuthentication(cmd, rawBody,deferredState)
    if not devT or not zoneT then return end
+   if data.command == "SetIpAddress" then ClientLog.device(deferredState.context,devT,data.ipAddress) end
    handler = commandHandlers[data.command]
    if not handler then
       return failure(cmd, 400, "unknown_command", "The command is not supported.")
@@ -559,7 +568,9 @@ local function command(cmd, response, deferredState)
 end
 
 local function safe(handler, cmd, response)
-   local deferredState = {}
+   local deferredState = {context=ClientLog.context(peername(cmd))}
+   local log=ClientLog.logger(log,deferredState.context)
+   deferredState.log=log
    local function onError(err)
       -- The error may include attacker-controlled request data. Keep the stack
       -- for diagnosis without copying the error value into operational logs.

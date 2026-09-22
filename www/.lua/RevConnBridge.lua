@@ -83,7 +83,7 @@ local function createSecret()
 end
 
 -- Set up a new idle (pending) device reverse connection
-local function newDevice(zname,rname,dkey,sock)
+local function newDevice(zname,rname,dkey,sock,clientLog)
    if not sock then return end
    if rname and 0==#rname then rname=nil end
    dkey=dkey:lower()
@@ -101,8 +101,9 @@ local function newDevice(zname,rname,dkey,sock)
       }
       devicesT[dkey] = deviceT
       dzT[deviceT.dz] = deviceT
-      setRecord(zname, deviceT.dz)
+      setRecord(zname, deviceT.dz,nil,clientLog)
    end
+   deviceT.log=clientLog
    -- Generated reverse names are credentials and must not be logged.
    tracep(9,"Device reverse connection",zname,sock)
    deviceT.lastActiveTime=ba.datetime"NOW"
@@ -199,7 +200,8 @@ local function terminateIdleDevs()
          deviceT.dz=createSecret()
          dzT[deviceT.dz]=deviceT
          deviceT.secretExpTime = ba.datetime"MAX"
-         setRecord(deviceT.zname, deviceT.dz)
+         local ok=pcall(setRecord,deviceT.zname,deviceT.dz,nil,deviceT.log)
+         if not ok then (deviceT.log or log)(true,"Reverse-connection DNS refresh failed for zone %s",deviceT.zname) end
       end
    end
    return true -- Keep running interval timer
