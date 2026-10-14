@@ -24,6 +24,18 @@ If the Mako Server is used for any purpose other than hosting the SharkTrustX Po
 
 The software requires two name servers listed in the configuration file. However, the software is currently limited to running on one VPS and the DNS A record for the three fields above must all point to the same VPS.
 
+## DNS registration prerequisites
+
+The Linux portal requires BIND9, `rndc`, and `dig`. On Ubuntu, install
+`bind9`, `bind9-utils`, and `bind9-dnsutils`. Registration checks the parent
+delegation with an IPv4 DNS trace; WHOIS is not used for delegated subdomains.
+Allow outbound UDP and TCP port 53 to authoritative DNS servers, not just to
+the machine's configured recursive resolver.
+
+BIND must read the generated zone files as its own user. The portal sets its
+zone directory to `0755` and generated DNS files to `0644`, allowing the
+service to retain `UMask=0077` for private keys and credentials.
+
 ## Tutorials
 
 * [Installing the SharkTrustX Portal](https://realtimelogic.com/articles/Installing-the-SharkTrustX-Portal)

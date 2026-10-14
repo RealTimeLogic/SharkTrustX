@@ -94,6 +94,23 @@ print[[
   Server build or compile into a DLL/shared-library for the Mako
   Server
 
+  **** Pure C with BWS/SharkSSL:
+
+  Compile this file with TOKENGEN_C_API defined and link with BWS/SharkSSL.
+  This selects the existing SharkSSL crypto APIs and excludes all Lua code.
+  Declare these functions in your application:
+
+  void tokengen_info(const char **portalDomain, const uint8_t **key);
+  int tokengen_proof(const uint8_t *message, size_t messageLen, uint8_t proof[32]);
+
+  tokengen_info returns borrowed pointers with static lifetime: a NUL-terminated
+  portal domain and a 32-byte binary zone key. Both output pointers are required.
+  tokengen_proof authenticates messageLen bytes, including embedded NUL bytes,
+  and writes 32 proof bytes. It returns zero on success, nonzero on failure;
+  use the output only on success. Supply a valid message buffer (0 to UINT32_MAX
+  bytes) and proof buffer. This API authenticates requests; it does not encrypt
+  saved state. TOKENGEN_C_API takes precedence over the Lua and test modes below.
+
   **** Barracuda App Server build:
 
   In your main startup code, include the following C code:
@@ -130,12 +147,16 @@ print[[
   Make sure you can load the module by creating a simple LSP page that runs the following code: require"tokengen"
 */
 
-#if !defined(EMBEDDED_ZONE_KEY) && !defined(TOKENGEN_STANDALONE)
+#ifdef TOKENGEN_C_API
+#include <SharkSSL.h>
+#include <SharkSslCrypto.h>
+#elif !defined(EMBEDDED_ZONE_KEY) && !defined(TOKENGEN_STANDALONE)
 #include <luaintf.h>
 #include <lauxlib.h>
 #endif
 
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 
 #ifdef __GNUC__
@@ -145,7 +166,7 @@ print[[
 #pragma diag_suppress=Pa079
 #endif
 
-#ifndef TOKENGEN_STANDALONE
+#if !defined(TOKENGEN_STANDALONE) && !defined(TOKENGEN_C_API)
 typedef struct
 {
    lua_CFunction rndbs;
@@ -156,7 +177,7 @@ static const uint8_t zkASCII[] = {
 '0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'
 };
 
-#if !defined(EMBEDDED_ZONE_KEY) || defined(TOKENGEN_STANDALONE)
+#if !defined(TOKENGEN_C_API) && (!defined(EMBEDDED_ZONE_KEY) || defined(TOKENGEN_STANDALONE))
 
 
 typedef struct {
@@ -441,6 +462,7 @@ PBKDF2(uint8_t *dk, const char *passphrase, const char *salt,
    sharkssl_PEM_PBKDF2(dk, pwd, salt, saltLen, iterations, dkLen, SHARKSSL_HASHID_SHA256)
 #endif
 
+#ifndef TOKENGEN_C_API
 #if !defined(EMBEDDED_ZONE_KEY) || defined(TOKENGEN_STANDALONE)
 typedef HMACCtx HMAC256Ctx;
 static void
@@ -460,6 +482,7 @@ HMAC256_constructor(HMAC256Ctx *ctx, const uint8_t *key, uint16_t keyLen)
 #define HMAC256_append SharkSslHMACCtx_append
 #define HMAC256_finish SharkSslHMACCtx_finish
 #endif
+#endif /* !TOKENGEN_C_API */
 ]]
 
 print"static const uint8_t secData[]={"
@@ -470,7 +493,20 @@ local zkT={}
 for x in zoneT.zkey:gmatch("%x%x") do table.insert(zkT, '0x'..x) end
 print(fmt("\tstatic const char zoneKey[] ={\n%s\n};",table.concat(zkT,",")))
 
-print"static void deriveZoneProofKey(uint8_t dk[32])\n{\n\tuint8_t buf[65];"
+print[[
+/* Reconstruct the obfuscated secret, derive the proof key, then erase it. */
+#ifdef TOKENGEN_C_API
+static int
+#else
+static void
+#endif
+deriveZoneProofKey(uint8_t dk[32])
+{
+   uint8_t buf[65];
+#ifdef TOKENGEN_C_API
+   int status;
+#endif
+]]
 
 for _,d in ipairs(codeT) do
    print(d)
@@ -478,11 +514,45 @@ end
 
 print[[
 	buf[64]=0;
+#ifdef TOKENGEN_C_API
+   status=PBKDF2(dk, (char*)buf, zoneKey, sizeof(zoneKey), 1000, 32);
+   sharkssl_clear(buf, sizeof(buf));
+   return status;
+#else
 	PBKDF2(dk, (char*)buf, zoneKey, sizeof(zoneKey), 1000, 32);
 	memset(buf, 0, sizeof(buf));
+#endif
 }
 
-#ifdef TOKENGEN_STANDALONE
+#ifdef TOKENGEN_C_API
+/* Return immutable provisioning data; neither pointer may be freed. */
+void tokengen_info(const char **portalDomain, const uint8_t **key)
+{
+]]
+print(fmt("   *portalDomain=%q;",zoneT.zname))
+print[[
+   *key=(const uint8_t*)zoneKey;
+}
+
+/* Authenticate exact message bytes and erase temporary key material. */
+int tokengen_proof(const uint8_t *message, size_t messageLen, uint8_t proof[32])
+{
+   SharkSslHMACCtx hmacCtx;
+   uint8_t dk[32];
+   int status;
+   if(messageLen > UINT32_MAX) return -1;
+   status=deriveZoneProofKey(dk);
+   if(!status)
+   {
+      SharkSslHMACCtx_constructor(&hmacCtx, SHARKSSL_HASHID_SHA256, dk, sizeof(dk));
+      SharkSslHMACCtx_append(&hmacCtx, message, (U32)messageLen);
+      SharkSslHMACCtx_finish(&hmacCtx, proof);
+      SharkSslHMACCtx_destructor(&hmacCtx);
+   }
+   sharkssl_clear(dk, sizeof(dk));
+   return status;
+}
+#elif defined(TOKENGEN_STANDALONE)
 static void
 tokengen_proof(const uint8_t *message, size_t messageLen, uint8_t proof[32])
 {
@@ -610,7 +680,7 @@ luaopen_tokengen(lua_State *L)
    return 1;
 } 
 #endif
-#endif /* TOKENGEN_STANDALONE */
+#endif /* TOKENGEN_C_API / TOKENGEN_STANDALONE / Lua */
 ]]
 
 

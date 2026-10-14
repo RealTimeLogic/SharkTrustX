@@ -30,15 +30,16 @@ local function emitInvalidDNS(rsp) ?>
 <p><br/></p>
 <div class="d-flex justify-content-center">
 <div class="alert alert-danger">
-<h2>Invalid Domain Name Servers</h2>
-<p>The domain name servers for your domain must be set to:</p>
+<h2>DNS Delegation Not Confirmed</h2>
+<p>The parent DNS zone must delegate your domain to:</p>
 <table>
 <tr><td>Name Server 1:</td><td><?lsp=ns.ns1?></td></tr>
 <tr><td>Name Server 2:</td><td><?lsp=ns.ns2?></td></tr>
 </table>
-<p>Note that it may take up to 48 hours for DNS changes to propagate. Please keep the validation key and retry later.</p>
-<p>Whois response:</p>
-<pre><?lsp=rsp?></pre>
+<p>If you recently changed the delegation, keep the validation key and retry after the DNS change is visible.</p>
+<p>If the lookup failed, the portal administrator should check that <code>dig</code> is installed and outbound DNS is available.</p>
+<p>DNS lookup details:</p>
+<pre><?lsp=app.xssfilter(rsp)?></pre>
 </div>
 </div>
 <?lsp
@@ -51,7 +52,7 @@ local function emitCredentialsForm(vk,email) ?>
 <div class="card card-body bg-light">
 <form id="pwdform" method="post">
 <div class="form-group">
-<label>Username:</label> <?lsp=email?>
+<label>Username:</label> <?lsp=app.xssfilter(email)?>
 </div>
 <div class="form-group">
 <label for="password">Admin Password:</label>
@@ -61,7 +62,7 @@ local function emitCredentialsForm(vk,email) ?>
 <label for="password2">Confirm Password:</label>
 <input class="form-control" placeholder="Repeat password" type="password" id="password2" name="password2" equalTo="#password" nowhitespace="true" tabindex="2">
 </div>
-<input type="hidden" name="v" value="<?lsp=vk?>">
+<input type="hidden" name="v" value="<?lsp=app.xssfilter(vk)?>">
 <input id="changesub" class="btn btn-primary" type="submit" value="Submit" tabindex="3">
  </form>
 </div>
@@ -114,19 +115,23 @@ local function sendRegCompletedEmail(email,zkey,domain)
 end
 
 
-local function whois(domain)
-   local tld=domain:match"(%.[^%.]+)$"
-   local whoisfmt=
-      "whois -h `whois -h whois.iana.org %s | egrep -e '^whois:' | sed -e 's/[[:space:]][[:space:]]*/ /g' | cut -d \" \" -f 2` %s"
-   local rsp,n,e=ba.exec(string.format(whoisfmt,tld,domain))
-   if not rsp then rsp = e or "FAILED" end
-   return rsp
-end
-
-local function digTrace(domain)
-   local rsp,n,e=ba.exec("dig @8.8.8.8 +trace NS "..domain)
-   if not rsp then rsp = e or "FAILED" end
-   return rsp
+local function checkDNS(domain)
+   -- The caller validates domain with app.validDomain before using it here.
+   local rsp,err,detail=ba.exec("dig -r -4 @8.8.8.8 +trace +nodnssec +time=2 +tries=1 NS "..domain)
+   rsp=rsp or detail
+   if not rsp then return false,"DNS lookup failed: "..tostring(err) end
+   local found={}
+   for line in rsp:gmatch("[^\r\n]+") do
+      local owner,target=line:lower():match("^(%S+)%s+%d+%s+in%s+ns%s+(%S+)%s*$")
+      if owner and owner:gsub("%.$","")==domain then
+         found[target:gsub("%.$","")]=true
+      end
+      -- Use the first matching RRset: the parent delegation is available even
+      -- before registration creates the child zone on our name servers.
+      if next(found) and line:match("^;; Received ") then break end
+   end
+   return not not (found[ns.ns1:lower():gsub("%.$","")] and
+                   found[ns.ns2:lower():gsub("%.$","")]),rsp
 end
 
 
@@ -134,10 +139,12 @@ if request:method()=="POST" then
    local data=request:data()
    if data.v then
       local t=ba.json.decode(app.aesdecode(data.v) or "")
-      if t then
+      if type(t)=="table" and app.validDomain(t.d) and type(t.e)=="string" then
          local email,domain=t.e,t.d
          if db.getZoneKey(domain) then return emitAlreadyReg() end
-         if data.password and data.password == data.password2 then
+         local valid,rsp=checkDNS(domain)
+         if not valid then return emitInvalidDNS(rsp) end
+         if type(data.password)=="string" and #data.password>=8 and data.password == data.password2 then
             local zkey=app.createZone(domain, email, data.password)
             local function send()
                ba.thread.run(function() sendRegCompletedEmail(email,zkey,domain) end)
@@ -146,17 +153,7 @@ if request:method()=="POST" then
             emitRegComplete()
             return
          else
-            local rspl=digTrace(domain):lower()
-            if rspl:find(ns.ns1,1,true) and rspl:find(ns.ns2,1,true) then
-               emitCredentialsForm(data.v,email)
-            else
-               rspl=whois(domain):lower()
-               if rspl:find(ns.ns1,1,true) and rspl:find(ns.ns2,1,true) then
-                  emitCredentialsForm(data.v,email)
-               else
-                  emitInvalidDNS(rspl)
-               end
-            end
+            emitCredentialsForm(data.v,email)
          end
          return
       end

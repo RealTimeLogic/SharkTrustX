@@ -166,13 +166,29 @@ end
 -- Execute command 'cmd' in /usr/sbin/ with 'args'
 local function execsbin(cmd,args,clientLog)
    cmd=fmt("/usr/sbin/%s %s",cmd,args)
-   local resp,ecode=baexec(cmd)
+   local resp,ecode,detail=baexec(cmd)
    if ecode ~= 0 then
+      resp=detail or resp or ""
       (clientLog or log)(true, "Command %s failed: %s %s", cmd, tostring(ecode), resp)
    end
    return {cmd=cmd,resp=resp,ecode=ecode}
 end
 
+
+-- BIND reads public DNS files under its own user, even with UMask=0077.
+local function bindAccess(path,mode)
+   local _,code,err=baexec("chmod "..mode.." '"..bindPath(path).."'")
+   assert(code==0,err or "Cannot set BIND file permissions")
+end
+
+function app.validDomain(name)
+   if type(name)~="string" or #name>253 or not name:find(".",1,true) or name:find("[^a-z0-9.-]") then return false end
+   if name:find("..",1,true) or name:sub(1,1)=="." or name:sub(-1)=="." then return false end
+   for label in name:gmatch("[^.]+") do
+      if #label>63 or not label:match("^[a-z0-9]") or not label:match("[a-z0-9]$") then return false end
+   end
+   return true
+end
 
 -- Returns /etc/bind/zones/[zname].db
 local function mkFullZname(zname)
@@ -196,6 +212,7 @@ local function updateNamedConf()
       fp:write(fmt(namedConfFmt,zname,zname))
    end
    fp:close()
+   bindAccess("/etc/bind/named.conf.local","644")
 end
 
 --  /etc/bind/zones/<name>.db
@@ -258,6 +275,7 @@ local function bindzonedb(zoneT, txtRecsT)
        end
     end
    fp:close()
+   bindAccess(mkFullZname(zname),"644")
 end
 
 -- Manage temporary Let's Encrypt TXT records.
@@ -337,12 +355,14 @@ end
 
 
 local function createZone(zname, uname, pwd)
+   assert(app.validDomain(zname),"Invalid domain name")
    if db.getZoneKey(zname) then return nil, "zone exists" end
    local zoneT
    zoneT=db.addZone(zname, uname, ha1(uname, pwd), function()
+      -- Publish the zone file before BIND reads its new configuration.
+      bindzonedb(zoneT)
       updateNamedConf()
       execsbin("rndc","reconfig")
-      bindzonedb(zoneT)
       ba.timer(function() certUpdater.addZone(zname) end):set(20000,true)
       log(false, "New zone %s : %s", zname, uname)
    end)
@@ -721,6 +741,7 @@ local function delayedLoad()
    if (not xio:stat"/etc/bind/zones/" and not xio:mkdir"/etc/bind/zones/") then
       error"Cannot access /etc/bind/zones/"
    end
+   bindAccess("/etc/bind/zones","755")
    -- rebuild all 'bind' settings
    local acmeSettings=settingsT.acme
    local disableAcme=acmeSettings.disabled == true
